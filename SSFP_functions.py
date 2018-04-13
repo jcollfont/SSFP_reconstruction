@@ -61,14 +61,16 @@ def SSFP_fit( M0, E1, E2, alpha, S):
 ## Compute L
 #	Subfunction of SSFP_fit.
 #
-def computeL( E1, alpha, n):
+def computeL( E1, alpha, N):
 
-    if n == 0:
-        Ln = E1**(-1)*(1-np.cos(alpha))
-    elif n > 0:
-        Ln = np.sin(alpha)**2*(E1*np.cos(alpha))**(n-1)
-
-    return Ln
+    L = np.zeros([N])
+    for n in range(N):
+        if n == 0:
+            L[n] = E1**(-1)*(1-np.cos(alpha))
+        elif n > 0:
+            L[n] = np.sin(alpha)**2*(E1*np.cos(alpha))**(n-1)
+            
+    return L
 
 ## Compute E1
 #		This function is necessary to compute the T1 weighted images.
@@ -84,11 +86,8 @@ def computeL( E1, alpha, n):
 #
 def computeE1(img, TR):
 
-	## Extract T1 params
-	T1 = 1
-
 	## Compute E1
-	E1 = np.exp(-TR*1/T1)
+	E1 = np.exp(-TR*1/img)
 
 	return E1
 
@@ -104,12 +103,32 @@ def computeE1(img, TR):
 #		OUTPUT:
 #			- E2 - <X,Y,Z>double - Longitudonal magnetization
 #
-def computeE1(img, TR):
-
-	## Extract T2 params
-	T2 = 2
+def computeE2(img, TR):
 
 	## Compute E2
-	E2 = np.exp(-TR*1/T2)
+	E2 = np.exp(-TR*1/img)
 
 	return E2
+
+## Compute all params
+#
+#
+#
+#
+def computeAllSSFPParams(t1wimg, t2wimg, TR, alpha, M0, N):
+    
+    # compute E1
+    E1 = computeE1(t1wimg, TR)
+    
+    # compute E2 
+    E2 = computeE1(t2wimg, TR)
+    
+    # compute L
+    L =  computeL( E1, alpha, N)
+    
+    # compute K
+    K = -M0*(1-E1)*E1*E2**2*np.sin(alpha) / ( 1 - E1*np.cos(alpha) )
+    
+    
+    return K, L, E1, E2
+    
