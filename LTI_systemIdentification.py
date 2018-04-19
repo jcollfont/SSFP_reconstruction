@@ -11,7 +11,7 @@ import numpy as np
 from scipy import signal, sparse
 from scipy.spatial.distance import cdist
 
-#import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 from MFMatomGeneration import generateTensorAtomsFromParam, generateTensorAtomsFromAtomSpecs, uniformRAndomDistributionOnSphere, generateVectorFromAngle
 
 
@@ -25,41 +25,33 @@ from MFMatomGeneration import generateTensorAtomsFromParam, generateTensorAtomsF
 #
 def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomSpecs, numAng, numSigma, numEigvalProp):
     
-    verbose = False
+    verbose = True
     
-    N, M = y.shape
+    N = y.size
+    M = 1
+    
     maxIter = 1e2
-    stepEpsilon = 1e-1
+    stepEpsilon = 1e-4
     ckEpsilon = 2.5
     numAtoms = impulseResponsePrev.shape[0]
     
     activeAtomsFixed = np.arange(len(atomSpecs))
     
     # reporting system
-#    if verbose:
-#        plt.figure()
+    if verbose:
+        plt.figure()
  
     # compute initial xk estimate
-    ck = sparse.lil_matrix((numAtoms,M), dtype=np.float32)
+    ck = np.zeros([numAtoms,M], dtype=np.float32)
     
     # prediagonalize Tau
-    sdTau = sparse.diags(tau)
+#    sdTau = sparse.diags(tau)
     
-    # set initial impulse responses if not available
-    if numAtoms == 0:
-        impulseResponsePrev = np.float32( L.dot( generateTensorAtomsFromParam( diffGradients, TR, qval, np.zeros([2,1]), np.ones([1])*1e-3, np.ones([1]) ) ) )
     
     # set initial guess
-    xk = np.float32( sdTau.dot(np.tile( impulseResponsePrev[0,:], [M,1])).transpose() )
-    ck[0,:] = tau
+    xk = np.zeros([N],dtype=np.float32)#np.float32( tau* np.tile( impulseResponsePrev[0,:], [M,1])).ravel()
+    ck[0] = 0
     
-    # determine parallelization blocks
-    numBlocks = 1
-    blockSize  = int(np.ceil(M/np.float(numBlocks)))
-    print 'Num blocks: %d of size: %d for total of %d voxels' %(numBlocks, blockSize, M)
-    blockIX = range(numBlocks)
-    for bb in range(numBlocks):    
-        blockIX[bb] = range( bb*blockSize, min( (bb+1)*blockSize, M)  )
     
     # ITERATE  !
     k = 0
@@ -67,24 +59,24 @@ def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomS
     while True:
         
         # plots
-#        if verbose:
-#            plt.clf()
-#            plt.plot(xk)
-#            plt.plot(y)
-#            plt.plot( y - xk )
-#            plt.title('Function approximation')
-#            plt.legend(['xk','y','grad'])
-#            plt.pause(0.1)
+        if verbose:
+            plt.clf()
+            plt.plot(xk)
+            plt.plot(y)
+            plt.plot( y - xk )
+            plt.title('Function approximation')
+            plt.legend(['xk','y','grad'])
+            plt.pause(0.1)
         
         # random atom generation
 #        angles = np.concatenate( ( np.random.uniform( 0.0, 2*np.pi,[1,numAng]), np.random.uniform( 0.0, np.pi,[1,numAng]) ) , axis=0)
         angles = uniformRAndomDistributionOnSphere(numAng)
-        sigmaScales = 10**np.random.uniform(-4,-2,numSigma)
-        eigvalProp = np.random.uniform( 1,20, numEigvalProp)
+        sigmaScales = 10**np.random.uniform(-5,-2,numSigma)
+        eigvalProp = np.random.uniform( 1,100, numEigvalProp)
         
         # create new and join with previous impulse responses
-        impulseResponse, atomSpecsNew = generateTensorAtomsFromParam( diffGradients, TR, qval, angles, sigmaScales, eigvalProp )
-        impulseResponse = np.concatenate( (impulseResponsePrev, impulseResponse ) )
+        impulseResponse, atomSpecsNew = generateTensorAtomsFromParam( diffGradients, TR, qval, angles, sigmaScales, eigvalProp ) 
+        impulseResponse = np.concatenate( (impulseResponsePrev, np.float32(impulseResponse.dot(L.T)) ) )
         numAtoms = impulseResponse.shape[0]
             
         # compute gradient
@@ -92,47 +84,40 @@ def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomS
         
         # compute projection of gradient on all atoms
 #        print 'Search for minimum atom descent'
-        tempK = Parallel(n_jobs=numBlocks)( delayed(minSearchPolicy)(impulseResponse, gradF[:, bb]) for bb in blockIX )
+        rp = np.float32( impulseResponse.dot( gradF ))
+
+        # select minimum projection
+        minK = rp.argmin()
         
-        # reconstruct minK array        
-        minK = np.ndarray([M], dtype=tempK[0].dtype)
-        for bb in range(numBlocks):
-            minK[blockIX[bb]] =  tempK[bb]
-            
         # set descent direction
 #        print 'Atom generation'
-        a = sdTau.dot(impulseResponse[minK,:]) - xk.transpose()
+        a = tau *impulseResponse[minK,:] - xk.transpose()
         
         # compute step length
 #        print 'Atom norm compute'
-        normA = np.sum(a**2,axis=1)
-        flagsNonInv = np.where(normA < 1e-8)[0]
-        if flagsNonInv.size > 0:            # in case a'*a = 0
-            normA.flags.writeable = True
-            normA[flagsNonInv] = 1.0
+        normA = np.sum(a**2)
+        flagsNonInv = normA < 1e-8
+        if flagsNonInv:            # in case a'*a = 0
+            normA = 1.0
         
 #        print 'Get alpha'
-        alpha = np.maximum( np.minimum( -np.sum( (a * gradF.transpose()) ,axis=1) / normA  ,np.ones([M])) ,np.zeros([M]) )
+        alpha = max( min( - a.dot( gradF) / normA ,1),0)
         
-        if flagsNonInv.size > 0:            # in case a'*a = 0
-            alpha[ flagsNonInv ] = 0
+        if flagsNonInv:            # in case a'*a = 0
+            alpha =  0
         
         # update xk
 #        print 'Update xk'
         x_prev = xk
-        xk = xk + sparse.diags(alpha).dot(a).transpose()
+        xk = xk + alpha*a.transpose()
         
         # update ck
 #        print 'update ck'
-        ck = ck.multiply(np.tile(1 - alpha, [numAtomsPrev,1]))
-        ck = sparse.vstack( [ck, sparse.lil_matrix((len(atomSpecsNew),M))], format='lil',dtype=np.float32)
-        tauAlpha = sdTau.dot(alpha)
-        ck[(minK,np.arange(M))] +=  tauAlpha
+        ck = ck*(1-alpha)
+        ck = np.concatenate( (ck, np.zeros([len(atomSpecsNew),M],dtype=np.float32) ))
+        ck[minK] +=  tau * alpha
         
         # prune unused ck
-#        activeAtoms = np.unique( np.concatenate(( activeAtomsFixed, ck.nonzero()[0] )) )
-#        activeAtoms = np.unique( ck.nonzero()[0] ) 
-        
         activeAtoms = np.where(np.sum( ck >=  ckEpsilon ,axis=1) > 0)[0]
         activeAtoms = np.unique( np.concatenate(( activeAtomsFixed, activeAtoms )) )
         
@@ -146,14 +131,14 @@ def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomS
         numAtomsPrev = activeAtoms.size
         
         # evaluate fit
-        fitErr = np.linalg.norm( xk - y  ,ord='fro')**2 / (N*M)
+        fitErr = np.linalg.norm( xk - y  ,ord=2)**2 / (N*M)
         
         
         # evaluate convergence and report iteration
-        stepSize = np.linalg.norm(xk - x_prev, ord='fro')**2 / (N*M)
+        stepSize = np.linalg.norm(xk - x_prev, ord=2)**2 / (N*M)
         updateReport = 'Iter: %d. Obj. fun.: %0.6f. Step: %0.6f. NumAtoms: %d, active: %d' %( k,  fitErr,  stepSize, numAtoms, numAtomsPrev) 
         print updateReport
-        if (k > maxIter) | (stepSize < stepEpsilon):
+        if (k > maxIter) :#| (stepSize < stepEpsilon):
             break
 
         
@@ -161,14 +146,14 @@ def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomS
         k +=1 
         
     # plots
-#    if verbose:
-#        plt.clf()
-#        plt.plot(xk)
-#        plt.plot(y,'o-')
-#        plt.plot( y - xk )
-#        plt.title('Function approximation')
-#        plt.legend(['xk','y','grad'])
-#        plt.pause(0.2)
+    if verbose:
+        plt.clf()
+        plt.plot(xk)
+        plt.plot(y,'o-')
+        plt.plot( y - xk )
+        plt.title('Function approximation')
+        plt.legend(['xk','y','grad'])
+        plt.pause(0.2)
     
     # return
     return ck, xk, impulseResponsePrev, atomSpecs

@@ -46,7 +46,7 @@ def SSFP_fit( M0, E1, E2, alpha, S):
     N = len(S)
 
     ## Compute K
-    K = -M0*(1-E1)*E1*E2**2*np.sin(alpha) / ( 1 - E1*np.cos(alpha) )
+    K = -M0*(1-E1)*E1*E2**2*np.sin(alpha/180.0*np.pi) / ( 1 - E1*np.cos(alpha/180.0*np.pi) )
 
     ## Compute L
     L = range(N)
@@ -64,14 +64,24 @@ def SSFP_fit( M0, E1, E2, alpha, S):
 def computeL( E1, alpha, N, numQvals):
 
     dataSize = E1.shape
+    vectorize = False
+    
+    if len(dataSize) == 0:
+        dataSize = [1,1,1]
+        vectorize = True
+    
     L = np.zeros( [ dataSize[0], dataSize[1], dataSize[2] , numQvals, N*numQvals])
     for nq in range(numQvals):
-        for n in range( nq*N, (nq+1)*N):
+        posIX = range(nq*N, (nq+1)*N)
+        for n in range(N):
             if n == 0:
-                L[:,:,:,nq,n] = E1**(-1)*(1-np.cos(alpha))
+                L[:,:,:,nq, posIX[n]] = E1**(-1)*(1-np.cos(alpha/180.0*np.pi))
             elif n > 0:
-                L[:,:,:,nq,n] = np.sin(alpha)**2*(E1*np.cos(alpha))**(n-1)
+                L[:,:,:,nq, posIX[n]] = np.sin(alpha/180.0*np.pi)**2*(E1*np.cos(alpha/180.0*np.pi))**(n-1)
             
+    if vectorize:
+        L = np.reshape(L,[numQvals, N*numQvals])
+        
     return L
 
 ## Compute E1
@@ -129,7 +139,7 @@ def computeAllSSFPParams(t1wimg, t2wimg, TR, alpha, M0, N, numQvals):
     L =  computeL( E1, alpha, N, numQvals)
     
     # compute K
-    K = -M0*(1-E1)*E1*E2**2*np.sin(alpha) / ( 1 - E1*np.cos(alpha) )
+    K = -M0*(1-E1)*E1*E2**2*np.sin(alpha/180.0*np.pi) / ( 1 - E1*np.cos(alpha/180.0*np.pi) )
     
     
     return K, L, E1, E2

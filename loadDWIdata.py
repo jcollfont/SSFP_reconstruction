@@ -25,7 +25,7 @@ import re
 def loadDWIdata(loadFolder, header):
     
 
-    epsilon = 0.9
+    epsilon = 0.99
     
     # load header
     headerPath = loadFolder+header

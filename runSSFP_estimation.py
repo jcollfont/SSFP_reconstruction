@@ -12,7 +12,8 @@ from scipy import sparse
 import nrrd
 from loadDWIdata import loadDWIdata, saveNRRDwithHeader
 from SSFP_functions import computeAllSSFPParams
-from LTI_systemIdentification import runLTIsysIDonSlice
+from LTI_systemIdentification import runLTIsysIDonSlice, runLTIsysID
+from MFMatomGeneration import generateTensorAtomsFromParam, generateTensorAtomsFromAtomSpecs, uniformRAndomDistributionOnSphere, generateVectorFromAngle
 
 
 #%% set paths
@@ -31,7 +32,7 @@ alpha = 35  # degrees (flip angle)
 M0 = 3  # T   (magnetic field strength)
 G = 40  # mT/m   (max gradient strength)
 N = 2   # number of longitudonal lines (echo number +1)
-TR = 40 #ms
+TR = 40*1e-3 #s
 
 #%% load data
 dataSSFP, qvalues, diffGradients, Bmax, headerPath, uniqueGrads, valIX = loadDWIdata(ssfpFolder, header)
@@ -55,38 +56,32 @@ numBval = qvalues.size
 spacing = Bmax/float(numBval-1)
 ixB0 = np.where( qvalues == 0 )[0]  # Find B-balues equal to 0
 
-K, L, E1, E2 = computeAllSSFPParams(t1wimg, t2wimg, TR, alpha, M0, N, numDiff)
-
-KL = np.reshape(np.tile(K,[N*numDiff**2,1,1,1]),[numDiff,N*numDiff,dataSize[0],dataSize[1],dataSize[2]]).transpose(2,3,4,0,1)*L
-
 TRsampling = (np.arange(N) +1)*TR
 
 
 
 #%% single slice algorithm
-print('Running algorithm on single slice')
+print('Running algorithm on single voxel')
+xx = 28
+yy = 42
 zz = 31
 anatMask = np.ones(dataSize[:3])
 start_time = time.time()
-recData, C_rec, atomSpecs, impulsePrev = runLTIsysIDonSlice(dataSSFP[:,:,zz,:], KL, anatMask[:,:,zz], diffGradients, TRsampling, qvalues, ixB0, np.zeros([0]), [], 1024, 10, 10)
-end_time = time.time()
 
-#%% ALGORITHM
-#print('Running algorithm on all voxels')
-#sliceBlockSize = 10
-#sliceBlocks = int(np.ceil(dataSize[2]/float(sliceBlockSize)))
-#recData = range(sliceBlocks)
-#C_rec = range(sliceBlocks)
-#atomSpecs = []
-#impulsePrev = np.zeros([0])
-#start_time = time.time()
-#for zz in range(sliceBlocks):
-#    print 'Block ' + str(zz) + ' of ' + str(sliceBlocks)
-#    sliceIX = range( zz*sliceBlockSize, min( (zz+1)*sliceBlockSize, dataSize[2] ) )
-#    recData[zz], C_rec[zz], atomSpecs, impulsePrev = runLTIsysIDonSlice(dataSSFP[:,:,sliceIX,:], K*L, anatMask[:,:,sliceIX], diffGradients, bvalues, ixB0, impulsePrev, atomSpecs, 1024, 10, 10)
-#    
-#end_time = time.time()
-#print('Total compute time: %s secs' %( end_time - start_time )) 
+# generate SSFP params
+K, L, E1, E2 = computeAllSSFPParams(t1wimg[xx,yy,zz], t2wimg[xx,yy,zz], TR, alpha, M0, N, numDiff)
+KL = L
+
+# create initial impulse
+impulsePrev, atomSpecs = generateTensorAtomsFromParam( diffGradients, TRsampling, qvalues, np.zeros([2,1]),10**np.linspace(-5,-2,20), np.ones([1]))
+impulsePrev = impulsePrev.dot(KL.T)
+
+# start atom search minimizaion
+tau = np.mean( dataSSFP[xx,yy,zz,ixB0], axis=0 )*100
+ck, xk, impulsePrev, atomSpecs = runLTIsysID( dataSSFP[xx,yy,zz,:], KL, tau, diffGradients, TRsampling, qvalues, impulsePrev, atomSpecs, 1024,10,10)
+
+end_time = time.time()
+print('Total compute time: %s secs' %( end_time - start_time )) 
 
 
 #%% save
