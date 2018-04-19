@@ -16,15 +16,15 @@ from LTI_systemIdentification import runLTIsysIDonSlice
 
 
 #%% set paths
-baseFolder = 'data_DWI/CSR_2/'
-ssfpFolder = baseFolder + 'common-processed/diffusion/cusp90/01-motioncorrected/'
-header = 'something.nhdr'
-t1wPath = baseFolder + 'common-processed/diffusion/cusp90/03-dwi2t1w_registration/c035_s02_t1w-to-b0.nrrd'
-t2wPath = baseFolder + 'common-processed/diffusion/cusp90/03-dwi2t1w_registration/c035_s02_t2w-to-b0.nrrd'
-maskPath = baseFolder + 'something.nrrd'
+baseFolder = '/Users/jaume/Desktop/DWI/csr/'
+ssfpFolder = baseFolder + 'data_for_analysis/ssfp/'
+header = 'ssfpData.nhdr'
+t1wPath = baseFolder + 'data_for_analysis/bestt1w_lowres.nrrd'
+t2wPath = baseFolder + 'data_for_analysis/bestt2w_lowres.nrrd'
+#maskPath = baseFolder + 'something.nrrd'
 
 appendName = 'basicAtom_ssfp'
-saveFolder = 'data_DWI/CSR_2/common-processed/ssfp/'
+saveFolder = '/Users/jaume/Desktop/DWI/csr/common-processed/ssfp/'
 
 #%% set params
 alpha = 30
@@ -49,6 +49,8 @@ except:
 #%% Compute params
 K, L, E1, E2 = computeAllSSFPParams(t1wimg, t2wimg, TR, alpha, M0, N)
 
+KL = np.tile(K,[L.shape[-1],1,1,1]).transpose(1,2,3,0)*L
+
 dataSize = dataSSFP.shape
 numAng = diffGradients.shape[0]
 numBval = bvalues.size 
@@ -56,22 +58,30 @@ spacing = Bmax/float(numBval-1)
 ixB0 = np.where( bvalues == 0 )[0]  # Find B-balues equal to 0
 
 
-#%% ALGORITHM
-print('Running algorithm on all voxels')
-sliceBlockSize = 10
-sliceBlocks = int(np.ceil(dataSize[2]/float(sliceBlockSize)))
-recData = range(sliceBlocks)
-C_rec = range(sliceBlocks)
-atomSpecs = []
-impulsePrev = np.zeros([0])
+#%% single slice algorithm
+print('Running algorithm on single slice')
+zz = 31
+anatMask = np.ones(dataSize[:3])
 start_time = time.time()
-for zz in range(sliceBlocks):
-    print 'Block ' + str(zz) + ' of ' + str(sliceBlocks)
-    sliceIX = range( zz*sliceBlockSize, min( (zz+1)*sliceBlockSize, dataSize[2] ) )
-    recData[zz], C_rec[zz], atomSpecs, impulsePrev = runLTIsysIDonSlice(dataSSFP[:,:,sliceIX,:], anatMask[:,:,sliceIX], diffGradients, bvalues, ixB0, impulsePrev, atomSpecs, 1024, 10, 10)
-    
+recData, C_rec, atomSpecs, impulsePrev = runLTIsysIDonSlice(dataSSFP[:,:,zz,:], KL, anatMask[:,:,zz], diffGradients, bvalues, ixB0, np.zeros([0]), [], 1024, 10, 10)
 end_time = time.time()
-print('Total compute time: %s secs' %( end_time - start_time )) 
+
+#%% ALGORITHM
+#print('Running algorithm on all voxels')
+#sliceBlockSize = 10
+#sliceBlocks = int(np.ceil(dataSize[2]/float(sliceBlockSize)))
+#recData = range(sliceBlocks)
+#C_rec = range(sliceBlocks)
+#atomSpecs = []
+#impulsePrev = np.zeros([0])
+#start_time = time.time()
+#for zz in range(sliceBlocks):
+#    print 'Block ' + str(zz) + ' of ' + str(sliceBlocks)
+#    sliceIX = range( zz*sliceBlockSize, min( (zz+1)*sliceBlockSize, dataSize[2] ) )
+#    recData[zz], C_rec[zz], atomSpecs, impulsePrev = runLTIsysIDonSlice(dataSSFP[:,:,sliceIX,:], K*L, anatMask[:,:,sliceIX], diffGradients, bvalues, ixB0, impulsePrev, atomSpecs, 1024, 10, 10)
+#    
+#end_time = time.time()
+#print('Total compute time: %s secs' %( end_time - start_time )) 
 
 
 #%% save

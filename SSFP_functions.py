@@ -63,12 +63,13 @@ def SSFP_fit( M0, E1, E2, alpha, S):
 #
 def computeL( E1, alpha, N):
 
-    L = np.zeros([N])
+    dataSize = E1.shape
+    L = np.zeros( [ dataSize[0], dataSize[1], dataSize[2] ,N])
     for n in range(N):
         if n == 0:
-            L[n] = E1**(-1)*(1-np.cos(alpha))
+            L[:,:,:,n] = E1**(-1)*(1-np.cos(alpha))
         elif n > 0:
-            L[n] = np.sin(alpha)**2*(E1*np.cos(alpha))**(n-1)
+            L[:,:,:,n] = np.sin(alpha)**2*(E1*np.cos(alpha))**(n-1)
             
     return L
 

@@ -54,7 +54,7 @@ def runLTIsysID( y, L,  tau, diffGradients, bval, impulseResponsePrev, atomSpecs
     ck[0,:] = tau
     
     # determine parallelization blocks
-    numBlocks = 50
+    numBlocks = 1
     blockSize  = int(np.ceil(M/np.float(numBlocks)))
     print 'Num blocks: %d of size: %d for total of %d voxels' %(numBlocks, blockSize, M)
     blockIX = range(numBlocks)
@@ -185,7 +185,7 @@ def minSearchPolicy(impulseResponse, gradF):
     return minK
     
 #%%
-def runLTIsysIDonSlice( dataSlice, anatMask, diffGradients, bval,  ixB0 , impulsePrev, atomSpecs, numAng, numSigma, numEigvalProp ):
+def runLTIsysIDonSlice( dataSlice, T, anatMask, diffGradients, bval,  ixB0 , impulsePrev, atomSpecs, numAng, numSigma, numEigvalProp ):
     
     dataSize = dataSlice.shape
     np.random.seed()
@@ -205,7 +205,7 @@ def runLTIsysIDonSlice( dataSlice, anatMask, diffGradients, bval,  ixB0 , impuls
         
         # run algorithm
         tau = np.mean( dataSlice[ixB0,:], axis=0 )
-        ck, xk, impulsePrev, atomSpecs = runLTIsysID( np.float32(dataSlice), tau, diffGradients, bval, impulsePrev, atomSpecs, numAng, numSigma, numEigvalProp)
+        ck, xk, impulsePrev, atomSpecs = runLTIsysID( np.float32(dataSlice), T, tau, diffGradients, bval, impulsePrev, atomSpecs, numAng, numSigma, numEigvalProp)
         
         # reconstruct data
         recData[:,anatMaskIX] = xk
