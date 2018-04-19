@@ -23,7 +23,7 @@ from MFMatomGeneration import generateTensorAtomsFromParam, generateTensorAtomsF
 #
 #
 #
-def runLTIsysID( y, L,  tau, diffGradients, bval, impulseResponsePrev, atomSpecs, numAng, numSigma, numEigvalProp):
+def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomSpecs, numAng, numSigma, numEigvalProp):
     
     verbose = False
     
@@ -47,7 +47,7 @@ def runLTIsysID( y, L,  tau, diffGradients, bval, impulseResponsePrev, atomSpecs
     
     # set initial impulse responses if not available
     if numAtoms == 0:
-        impulseResponsePrev = np.float32( L.dot( generateTensorAtomsFromParam( diffGradients, bval, np.zeros([2,1]), np.ones([1])*1e-3, np.ones([1]) ) ) )
+        impulseResponsePrev = np.float32( L.dot( generateTensorAtomsFromParam( diffGradients, TR, qval, np.zeros([2,1]), np.ones([1])*1e-3, np.ones([1]) ) ) )
     
     # set initial guess
     xk = np.float32( sdTau.dot(np.tile( impulseResponsePrev[0,:], [M,1])).transpose() )
@@ -83,8 +83,8 @@ def runLTIsysID( y, L,  tau, diffGradients, bval, impulseResponsePrev, atomSpecs
         eigvalProp = np.random.uniform( 1,20, numEigvalProp)
         
         # create new and join with previous impulse responses
-        impulseResponse, atomSpecsNew = generateTensorAtomsFromParam( diffGradients, bval, angles, sigmaScales, eigvalProp )
-        impulseResponse = np.concatenate( (impulseResponsePrev, np.float32(L.dot(impulseResponse))) )
+        impulseResponse, atomSpecsNew = generateTensorAtomsFromParam( diffGradients, TR, qval, angles, sigmaScales, eigvalProp )
+        impulseResponse = np.concatenate( (impulseResponsePrev, impulseResponse ) )
         numAtoms = impulseResponse.shape[0]
             
         # compute gradient
@@ -185,14 +185,14 @@ def minSearchPolicy(impulseResponse, gradF):
     return minK
     
 #%%
-def runLTIsysIDonSlice( dataSlice, T, anatMask, diffGradients, bval,  ixB0 , impulsePrev, atomSpecs, numAng, numSigma, numEigvalProp ):
+def runLTIsysIDonSlice( dataSlice, T, anatMask, diffGradients, TR, qval,  ixB0 , impulsePrev, atomSpecs, numAng, numSigma, numEigvalProp ):
     
     dataSize = dataSlice.shape
     np.random.seed()
     
     # atoms for water fraction
     if impulsePrev.size == 0:
-        impulsePrev, atomSpecs = generateTensorAtomsFromParam( diffGradients, bval, np.zeros([2,1]),10**np.random.uniform(-4,-2,numSigma), np.ones([1]))
+        impulsePrev, atomSpecs = generateTensorAtomsFromParam( diffGradients, TR, qval, np.zeros([2,1]),10**np.random.uniform(-4,-2,numSigma), np.ones([1]))
     
     anatMaskIX = np.where(anatMask.ravel() == 1)[0]
     recData = np.zeros([dataSize[-1],np.prod(dataSize[0:-1])])
@@ -205,7 +205,7 @@ def runLTIsysIDonSlice( dataSlice, T, anatMask, diffGradients, bval,  ixB0 , imp
         
         # run algorithm
         tau = np.mean( dataSlice[ixB0,:], axis=0 )
-        ck, xk, impulsePrev, atomSpecs = runLTIsysID( np.float32(dataSlice), T, tau, diffGradients, bval, impulsePrev, atomSpecs, numAng, numSigma, numEigvalProp)
+        ck, xk, impulsePrev, atomSpecs = runLTIsysID( np.float32(dataSlice), T, tau, diffGradients, TR, qval, impulsePrev, atomSpecs, numAng, numSigma, numEigvalProp)
         
         # reconstruct data
         recData[:,anatMaskIX] = xk

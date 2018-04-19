@@ -16,28 +16,30 @@ from LTI_systemIdentification import runLTIsysIDonSlice
 
 
 #%% set paths
-baseFolder = '/Users/jaume/Desktop/DWI/csr/'
+baseFolder = './data_DWI/CSRBRAINS/20180416/'
 ssfpFolder = baseFolder + 'data_for_analysis/ssfp/'
 header = 'ssfpData.nhdr'
 t1wPath = baseFolder + 'data_for_analysis/bestt1w_lowres.nrrd'
 t2wPath = baseFolder + 'data_for_analysis/bestt2w_lowres.nrrd'
-#maskPath = baseFolder + 'something.nrrd'
+maskPath = baseFolder + 'something.nrrd'
 
 appendName = 'basicAtom_ssfp'
 saveFolder = '/Users/jaume/Desktop/DWI/csr/common-processed/ssfp/'
 
 #%% set params
-alpha = 30
-M0 = 3
-N = 5
-TR = 2
+alpha = 35  # degrees (flip angle)
+M0 = 3  # T   (magnetic field strength)
+G = 40  # mT/m   (max gradient strength)
+N = 2   # number of longitudonal lines (echo number +1)
+TR = 40 #ms
 
 #%% load data
-dataSSFP, bvalues, Gnorm, Bmax, headerPath, diffGradients, valIX = loadDWIdata(ssfpFolder, header)
+dataSSFP, qvalues, diffGradients, Bmax, headerPath, uniqueGrads, valIX = loadDWIdata(ssfpFolder, header)
 
 t1wimg = nrrd.read(t1wPath)[0]
 t2wimg = nrrd.read(t2wPath)[0]
 
+qvalues = np.abs(qvalues)**2
 
 # Retrieve anatomical mask
 try:
@@ -47,15 +49,18 @@ except:
 
 
 #%% Compute params
-K, L, E1, E2 = computeAllSSFPParams(t1wimg, t2wimg, TR, alpha, M0, N)
-
-KL = np.tile(K,[L.shape[-1],1,1,1]).transpose(1,2,3,0)*L
-
 dataSize = dataSSFP.shape
-numAng = diffGradients.shape[0]
-numBval = bvalues.size 
+numDiff = diffGradients.shape[0]
+numBval = qvalues.size 
 spacing = Bmax/float(numBval-1)
-ixB0 = np.where( bvalues == 0 )[0]  # Find B-balues equal to 0
+ixB0 = np.where( qvalues == 0 )[0]  # Find B-balues equal to 0
+
+K, L, E1, E2 = computeAllSSFPParams(t1wimg, t2wimg, TR, alpha, M0, N, numDiff)
+
+KL = np.reshape(np.tile(K,[N*numDiff**2,1,1,1]),[numDiff,N*numDiff,dataSize[0],dataSize[1],dataSize[2]]).transpose(2,3,4,0,1)*L
+
+TRsampling = (np.arange(N) +1)*TR
+
 
 
 #%% single slice algorithm
@@ -63,7 +68,7 @@ print('Running algorithm on single slice')
 zz = 31
 anatMask = np.ones(dataSize[:3])
 start_time = time.time()
-recData, C_rec, atomSpecs, impulsePrev = runLTIsysIDonSlice(dataSSFP[:,:,zz,:], KL, anatMask[:,:,zz], diffGradients, bvalues, ixB0, np.zeros([0]), [], 1024, 10, 10)
+recData, C_rec, atomSpecs, impulsePrev = runLTIsysIDonSlice(dataSSFP[:,:,zz,:], KL, anatMask[:,:,zz], diffGradients, TRsampling, qvalues, ixB0, np.zeros([0]), [], 1024, 10, 10)
 end_time = time.time()
 
 #%% ALGORITHM
@@ -85,18 +90,18 @@ end_time = time.time()
 
 
 #%% save
-np.savez( saveFolder + 'recParams_'+ appendName, crec=C_rec, aspecs=atomSpecs )
-
-# reorganize the resulting data
-numAtoms = len(atomSpecs)
-tempRec = np.zeros(dataSize,dtype=np.float32)
-for zz in range(sliceBlocks):
-    sliceIX = range( zz*sliceBlockSize, min( (zz+1)*sliceBlockSize, dataSize[2] ) )
-    # rec signal
-    tempRec[:,:,sliceIX,:] = recData[zz]
- 
-
-# save and compute error
-saveNRRDwithHeader( np.float32(tempRec), headerPath, saveFolder, 'recData_' + appendName , bvalues, diffGradients )
-errData = np.float32(tempRec - dataSSFP)
-saveNRRDwithHeader( errData, headerPath, saveFolder, 'errRecData_' + appendName , bvalues, diffGradients )
+#np.savez( saveFolder + 'recParams_'+ appendName, crec=C_rec, aspecs=atomSpecs )
+#
+## reorganize the resulting data
+#numAtoms = len(atomSpecs)
+#tempRec = np.zeros(dataSize,dtype=np.float32)
+#for zz in range(sliceBlocks):
+#    sliceIX = range( zz*sliceBlockSize, min( (zz+1)*sliceBlockSize, dataSize[2] ) )
+#    # rec signal
+#    tempRec[:,:,sliceIX,:] = recData[zz]
+# 
+#
+## save and compute error
+#saveNRRDwithHeader( np.float32(tempRec), headerPath, saveFolder, 'recData_' + appendName , bvalues, diffGradients )
+#errData = np.float32(tempRec - dataSSFP)
+#saveNRRDwithHeader( errData, headerPath, saveFolder, 'errRecData_' + appendName , bvalues, diffGradients )
