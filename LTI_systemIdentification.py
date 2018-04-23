@@ -30,9 +30,10 @@ def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomS
     N = y.size
     M = 1
     
-    maxIter = 1e2
-    stepEpsilon = 1e-4
-    ckEpsilon = 2.5
+    maxIter = 2e2
+    minIter = 10
+    stepEpsilon = 1e-2
+    ckEpsilon = 1e-6
     numAtoms = impulseResponsePrev.shape[0]
     
     activeAtomsFixed = np.arange(len(atomSpecs))
@@ -49,8 +50,8 @@ def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomS
     
     
     # set initial guess
-    xk = np.zeros([N],dtype=np.float32)#np.float32( tau* np.tile( impulseResponsePrev[0,:], [M,1])).ravel()
-    ck[0] = 0
+    xk = np.float32( tau* np.tile( impulseResponsePrev[0,:], [M,1])).ravel()
+    ck[0] = tau
     
     
     # ITERATE  !
@@ -71,12 +72,12 @@ def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomS
         # random atom generation
 #        angles = np.concatenate( ( np.random.uniform( 0.0, 2*np.pi,[1,numAng]), np.random.uniform( 0.0, np.pi,[1,numAng]) ) , axis=0)
         angles = uniformRAndomDistributionOnSphere(numAng)
-        sigmaScales = 10**np.random.uniform(-5,-2,numSigma)
-        eigvalProp = np.random.uniform( 1,100, numEigvalProp)
+        sigmaScales = np.random.uniform(1e-4,1e-2,numSigma)
+        eigvalProp = np.random.uniform( 1,20, numEigvalProp)
         
         # create new and join with previous impulse responses
         impulseResponse, atomSpecsNew = generateTensorAtomsFromParam( diffGradients, TR, qval, angles, sigmaScales, eigvalProp ) 
-        impulseResponse = np.concatenate( (impulseResponsePrev, np.float32(impulseResponse.dot(L.T)) ) )
+        impulseResponse = np.concatenate( (impulseResponsePrev, impulseResponse.dot(L.T)) )
         numAtoms = impulseResponse.shape[0]
             
         # compute gradient
@@ -118,7 +119,7 @@ def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomS
         ck[minK] +=  tau * alpha
         
         # prune unused ck
-        activeAtoms = np.where(np.sum( ck >=  ckEpsilon ,axis=1) > 0)[0]
+        activeAtoms = np.where( ck >=  ckEpsilon )[0]
         activeAtoms = np.unique( np.concatenate(( activeAtomsFixed, activeAtoms )) )
         
         ck =  ck[activeAtoms,:]
@@ -136,9 +137,9 @@ def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomS
         
         # evaluate convergence and report iteration
         stepSize = np.linalg.norm(xk - x_prev, ord=2)**2 / (N*M)
-        updateReport = 'Iter: %d. Obj. fun.: %0.6f. Step: %0.6f. NumAtoms: %d, active: %d' %( k,  fitErr,  stepSize, numAtoms, numAtomsPrev) 
+        updateReport = 'Iter: %d. Obj. fun.: %0.6f. Step: %0.6f. NumAtoms: %d, active: %d. Last: %d' %( k,  fitErr,  stepSize, numAtoms, numAtomsPrev, minK)
         print updateReport
-        if (k > maxIter) :#| (stepSize < stepEpsilon):
+        if (k > minIter) & ((k > maxIter) | (stepSize < stepEpsilon)):
             break
 
         
@@ -159,7 +160,7 @@ def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomS
     return ck, xk, impulseResponsePrev, atomSpecs
 
 #%%
-def minSearchPolicy(impulseResponse, gradF):
+def voxelWiseOpt(impulseResponse, gradF, tau, xk, L):
     
     # compute projection of gradient on all atoms
     rp = np.float32(np.dot( impulseResponse , gradF ))
@@ -167,7 +168,22 @@ def minSearchPolicy(impulseResponse, gradF):
     # select minimum projection
     minK = rp.argmin(axis=0)
     
-    return minK
+    a = tau *impulseResponse[minK,:] - xk.transpose()
+        
+    # compute step length
+#        print 'Atom norm compute'
+    normA = np.sum(a**2)
+    flagsNonInv = normA < 1e-8
+    if flagsNonInv:            # in case a'*a = 0
+        normA = 1.0
+    
+#        print 'Get alpha'
+    alpha = max( min( - a.dot( gradF) / normA ,1),0)
+    
+    if flagsNonInv:            # in case a'*a = 0
+        alpha =  0
+
+    return a, alpha, minK
     
 #%%
 def runLTIsysIDonSlice( dataSlice, T, anatMask, diffGradients, TR, qval,  ixB0 , impulsePrev, atomSpecs, numAng, numSigma, numEigvalProp ):

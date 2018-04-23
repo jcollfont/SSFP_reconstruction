@@ -55,7 +55,7 @@ def generateVectorFromAngle(yaw, pitch):
             vec[mm] = np.matmul( np.array(R), np.eye(3) )
         
     else:    
-        
+        roll = 0
         Rx = np.matrix([[1, 0, 0],[0, np.cos(roll), -np.sin(roll)], [0, np.sin(roll), np.cos(roll)]])
         Ry = np.matrix([ [np.cos(pitch), 0, np.sin(pitch)], [0, 1, 0], [-np.sin(pitch), 0, np.cos(pitch)]  ])
         Rz = np.matrix([[np.cos(yaw), -np.sin(yaw), 0],[np.sin(yaw), np.cos(yaw),0 ], [0,0,1 ]])
@@ -202,12 +202,11 @@ def generateTensorAtomsFromParam( diffGradients, TR, qval, angles, sigmaScales, 
     
     # compute impulse response 
     for gg in range(numGrad):
-        for tt in range(numTR):
-            tempImp =  np.exp( np.outer( diffCoef[gg,:] ,  TR[tt]*qval[gg] ) )
-            if (gg == 0 ) & (tt==0):
-                impulseResponses = tempImp
-            else:
-                impulseResponses = np.concatenate( (impulseResponses, tempImp), axis=1 )
+        tempImp =  np.exp( np.outer( diffCoef[gg,:] ,  TR.T*qval[gg] ) )
+        if (gg == 0 ):
+            impulseResponses = tempImp
+        else:
+            impulseResponses = np.concatenate( (impulseResponses, tempImp), axis=1 )
     
     return impulseResponses, atomSpecs
 
@@ -257,13 +256,13 @@ def generateTensorAtomsFromAtomSpecs( diffGradients, bval, atomSpecs ):
         sigmas = atomSpecs[aa]['sigmas']
         
         # compute diffusion coeff at each gradient direction
-        diffCoef[:,aa] = -np.diag(np.matmul( K[aa,:,:], np.matmul(np.diag(sigmas), K[aa,:,:].transpose()) ))
+        diffCoef[:,aa] = -np.diag(np.matmul( K[0,:,:], np.matmul(np.diag(sigmas), K[0,:,:].transpose()) ))
                   
     # compute impulse response 
     diffusionVectors = np.zeros([0,3])
     for gg in range(numGrad): 
-        tempImp =  np.exp( np.outer(diffCoef[gg,:], bval) )
-        diffusionVectors= np.concatenate(( diffusionVectors, np.outer(bval,diffGradients[gg,:])   ))
+        tempImp =  np.exp( np.outer(diffCoef[gg,:], bval[gg]) )
+        diffusionVectors= np.concatenate(( diffusionVectors, np.outer(bval[gg],diffGradients[gg,:])   ))
         if gg == 0:
             impulseResponses = tempImp
         else:

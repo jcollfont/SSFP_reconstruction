@@ -16,6 +16,8 @@ from LTI_systemIdentification import runLTIsysIDonSlice, runLTIsysID
 from MFMatomGeneration import generateTensorAtomsFromParam, generateTensorAtomsFromAtomSpecs, uniformRAndomDistributionOnSphere, generateVectorFromAngle
 
 
+import matplotlib.pyplot as plt
+
 #%% set paths
 baseFolder = './data_DWI/CSRBRAINS/20180416/'
 ssfpFolder = baseFolder + 'data_for_analysis/ssfp/'
@@ -29,9 +31,9 @@ saveFolder = '/Users/jaume/Desktop/DWI/csr/common-processed/ssfp/'
 
 #%% set params
 alpha = 35  # degrees (flip angle)
-M0 = 3  # T   (magnetic field strength)
+M0 = 1  # T   (magnetic field strength)
 G = 40  # mT/m   (max gradient strength)
-N = 2   # number of longitudonal lines (echo number +1)
+N = 5   # number of longitudonal lines (echo number +1)
 TR = 40*1e-3 #s
 
 #%% load data
@@ -59,31 +61,89 @@ ixB0 = np.where( qvalues == 0 )[0]  # Find B-balues equal to 0
 TRsampling = (np.arange(N) +1)*TR
 
 
+#coords = [ [30,37,32], [40,40,32], [28,41,31], [27,42,31], [58,58,25], [58,48,23] ]
+xy, yx = np.meshgrid(np.arange(30,40 ), np.arange(30,40) )
+coords = list(  np.concatenate(( xy.reshape([xy.size,1]), yx.reshape([xy.size,1]), 32*np.ones([xy.size,1]) ) ,axis=1) )
 
 #%% single slice algorithm
 print('Running algorithm on single voxel')
-xx = 28
-yy = 42
-zz = 31
-anatMask = np.ones(dataSize[:3])
-start_time = time.time()
-
-# generate SSFP params
-K, L, E1, E2 = computeAllSSFPParams(t1wimg[xx,yy,zz], t2wimg[xx,yy,zz], TR, alpha, M0, N, numDiff)
-KL = L
-
-# create initial impulse
-impulsePrev, atomSpecs = generateTensorAtomsFromParam( diffGradients, TRsampling, qvalues, np.zeros([2,1]),10**np.linspace(-5,-2,20), np.ones([1]))
-impulsePrev = impulsePrev.dot(KL.T)
-
-# start atom search minimizaion
-tau = np.mean( dataSSFP[xx,yy,zz,ixB0], axis=0 )*100
-ck, xk, impulsePrev, atomSpecs = runLTIsysID( dataSSFP[xx,yy,zz,:], KL, tau, diffGradients, TRsampling, qvalues, impulsePrev, atomSpecs, 1024,10,10)
-
-end_time = time.time()
-print('Total compute time: %s secs' %( end_time - start_time )) 
-
-
+ck = range(len(coords))
+xk = range(len(coords))
+atomSpecs = range(len(coords))
+for ii in range(len(coords)):
+    xx = int(coords[ii][0])
+    yy = int(coords[ii][1])
+    zz = int(coords[ii][2])
+    anatMask = np.ones(dataSize[:3])
+    start_time = time.time()
+    
+    # generate SSFP params
+    K, L, E1, E2 = computeAllSSFPParams(t1wimg[xx,yy,zz], t2wimg[xx,yy,zz], TR, alpha, M0, N, numDiff)
+    KL = K*L 
+    
+    KL = KL * np.mean( dataSSFP[xx,yy,zz,ixB0], axis=0 ) / np.sum(KL[0,:])
+    
+    # create initial impulse
+    impulsePrev, atomSpecsInit = generateTensorAtomsFromParam( diffGradients, TRsampling, qvalues, np.zeros([2,1]),np.linspace(1e-4,1e-2,20), np.ones([1]))
+    impulsePrev = impulsePrev.dot(KL.T)
+    
+    # start atom search minimizaion
+    tau = 1.0
+    ck[ii], xk[ii], impulsePrev, atomSpecs[ii] = runLTIsysID( dataSSFP[xx,yy,zz,:], KL, tau, diffGradients, TRsampling, qvalues, impulsePrev, atomSpecsInit, 1024,20,10)
+    
+    end_time = time.time()
+    print('Total compute time: %s secs' %( end_time - start_time )) 
+    
+    
+    #%% PLOTS
+#for ii in range(len(coords)):
+#    xx = coords[ii][0]
+#    yy = coords[ii][1]
+#    zz = coords[ii][2]
+    
+    minWeight = 0.02
+    
+    plt.figure()
+    plt.plot(ck[ii])
+    plt.title('Weights')
+    
+    temp = np.zeros(dataSize[:2])
+    temp[xx,yy] = 1000
+    plt.figure()
+    plt.subplot(131)
+    plt.imshow(dataSSFP[:,:,zz,0].T + temp.T)
+    ax = plt.gca()
+    for jj in np.where(ck[ii]>minWeight)[0]:
+        ang = atomSpecs[ii][jj]['Angles']
+        X = np.cos(ang[0])*np.sin(ang[1])
+        Y = np.sin(ang[0])*np.sin(ang[1])
+        ax.quiver(xx,yy,X,Y,angles='xy',scale=0.5*1/ck[ii][jj])
+    plt.title('Fascicle directions axial, vx[%d,%d]' % (xx,yy))
+    plt.subplot(132)
+    temp = np.zeros([dataSize[0],dataSize[2]])
+    temp[xx,zz] = 1000
+    plt.imshow(dataSSFP[:,yy,:,0].T + temp.T)
+    ax = plt.gca()
+    for jj in np.where(ck[ii]>minWeight)[0]:
+        ang = atomSpecs[ii][jj]['Angles']
+        X = np.cos(ang[0])*np.sin(ang[1])
+        Z = np.cos(ang[1])
+        ax.quiver(xx,zz,X,Z,angles='xy',scale=0.5*1/ck[ii][jj])
+    plt.title('Fascicle directions coronal, vx[%d,%d]' % (xx,zz))
+    plt.subplot(133)
+    temp = np.zeros([dataSize[1],dataSize[2]])
+    temp[yy,zz] = 1000
+    plt.imshow(dataSSFP[xx,:,:,0].T + temp.T)
+    ax = plt.gca()
+    for jj in np.where(ck[ii]>minWeight)[0]:
+        ang = atomSpecs[ii][jj]['Angles']
+        Y = np.sin(ang[0])*np.sin(ang[1])
+        Z = np.cos(ang[1])
+        ax.quiver(yy,zz,Y,Z,angles='xy',scale=0.5*1/ck[ii][jj])
+    plt.title('Fascicle directions sagital, vx[%d,%d]' % (yy,zz))
+    
+    np.savez( './resultsVXOpt', coords=coords, xk=xk, ck=ck, aspecs=atomSpecs )
+    
 #%% save
 #np.savez( saveFolder + 'recParams_'+ appendName, crec=C_rec, aspecs=atomSpecs )
 #
