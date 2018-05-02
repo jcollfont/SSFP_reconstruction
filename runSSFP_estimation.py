@@ -36,6 +36,8 @@ G = 40  # mT/m   (max gradient strength)
 N = 5   # number of longitudonal lines (echo number +1)
 TR = 40*1e-3 #s
 
+numThreads = 1
+
 #%% load data
 dataSSFP, qvalues, diffGradients, Bmax, headerPath, uniqueGrads, valIX = loadDWIdata(ssfpFolder, header)
 
@@ -62,88 +64,88 @@ TRsampling = (np.arange(N) +1)*TR
 
 
 #coords = [ [30,37,32], [40,40,32], [28,41,31], [27,42,31], [58,58,25], [58,48,23] ]
-xy, yx = np.meshgrid(np.arange(30,40 ), np.arange(30,40) )
-coords = list(  np.concatenate(( xy.reshape([xy.size,1]), yx.reshape([xy.size,1]), 32*np.ones([xy.size,1]) ) ,axis=1) )
+xx, yy, zz = np.meshgrid(np.arange(30,40 ), np.arange(30,40), np.arange(30,40) )
+coords = list(  np.concatenate(( xx.reshape([xx.size,1]), yy.reshape([xx.size,1]), 32*np.ones([xx.size,1]) ) ,axis=1) )
 
 #%% single slice algorithm
 print('Running algorithm on single voxel')
 ck = range(len(coords))
 xk = range(len(coords))
 atomSpecs = range(len(coords))
-for ii in range(len(coords)):
-    xx = int(coords[ii][0])
-    yy = int(coords[ii][1])
-    zz = int(coords[ii][2])
-    anatMask = np.ones(dataSize[:3])
-    start_time = time.time()
+
+start_time = time.time()
+
+# compute SSFP variables
+K, L, E1, E2 = computeAllSSFPParams(t1wimg, t2wimg, TR, alpha, M0, N)
+KL = np.tile(K,[N,1,1,1]).transpose(1,2,3,0)*L
+KL = KL * np.tile( np.mean( dataSSFP[:,:,:,ixB0], axis=3 )/ np.sum(KL,axis=3) ,[N,1,1,1]).transpose(1,2,3,0) 
+
+anatMask = np.ones(xx.shape)
+print('start!')
+recData, atomCoef, atomSpecs, impulsePrev = runLTIsysIDonSlice( dataSSFP[xx,yy,zz,:].reshape( [xx.shape[0],xx.shape[1],xx.shape[2],114]), KL[xx,yy,zz,:].reshape([xx.shape[0],xx.shape[1],xx.shape[2],5]), anatMask, diffGradients, TRsampling, qvalues,  ixB0 , np.zeros([0]), [], 1024,10,10, numThreads)
     
-    # generate SSFP params
-    K, L, E1, E2 = computeAllSSFPParams(t1wimg[xx,yy,zz], t2wimg[xx,yy,zz], TR, alpha, M0, N, numDiff)
-    KL = K*L 
-    
-    KL = KL * np.mean( dataSSFP[xx,yy,zz,ixB0], axis=0 ) / np.sum(KL[0,:])
-    
-    # create initial impulse
-    impulsePrev, atomSpecsInit = generateTensorAtomsFromParam( diffGradients, TRsampling, qvalues, np.zeros([2,1]),np.linspace(1e-4,1e-2,20), np.ones([1]))
-    impulsePrev = impulsePrev.dot(KL.T)
-    
-    # start atom search minimizaion
-    tau = 1.0
-    ck[ii], xk[ii], impulsePrev, atomSpecs[ii] = runLTIsysID( dataSSFP[xx,yy,zz,:], KL, tau, diffGradients, TRsampling, qvalues, impulsePrev, atomSpecsInit, 1024,20,10)
-    
-    end_time = time.time()
-    print('Total compute time: %s secs' %( end_time - start_time )) 
+end_time = time.time()
+print('Total compute time: %s secs' %( end_time - start_time )) 
     
     
-    #%% PLOTS
-#for ii in range(len(coords)):
-#    xx = coords[ii][0]
-#    yy = coords[ii][1]
-#    zz = coords[ii][2]
-    
-    minWeight = 0.02
-    
-    plt.figure()
-    plt.plot(ck[ii])
-    plt.title('Weights')
-    
-    temp = np.zeros(dataSize[:2])
-    temp[xx,yy] = 1000
-    plt.figure()
-    plt.subplot(131)
-    plt.imshow(dataSSFP[:,:,zz,0].T + temp.T)
-    ax = plt.gca()
-    for jj in np.where(ck[ii]>minWeight)[0]:
-        ang = atomSpecs[ii][jj]['Angles']
+np.savez( './resultsVXOpt', coords=coords, xk=recData, atomCoef=atomCoef, aspecs=atomSpecs )
+
+#%% PLOTS
+medXX = int(np.median(xx))
+medYY = int(np.median(yy))
+medZZ =  int(np.median(zz))
+
+xx = xx.ravel()
+yy = yy.ravel()
+zz = zz.ravel()
+
+scaleFactor = 1
+
+minWeight = 0.02
+
+plt.figure()
+plt.plot(atomCoef)
+plt.title('Weights')
+
+plt.figure()
+temp = np.zeros(dataSize[:2])
+temp[xx,yy] = 1000
+plt.subplot(131)
+plt.imshow(dataSSFP[:,:,medZZ,0].T + temp.T)
+ax = plt.gca()
+for ii in range(1000):
+    for jj in np.where(atomCoef[:,ii]>minWeight)[0][1:]:
+        ang = atomSpecs[jj]['angles']
         X = np.cos(ang[0])*np.sin(ang[1])
         Y = np.sin(ang[0])*np.sin(ang[1])
-        ax.quiver(xx,yy,X,Y,angles='xy',scale=0.5*1/ck[ii][jj])
-    plt.title('Fascicle directions axial, vx[%d,%d]' % (xx,yy))
-    plt.subplot(132)
-    temp = np.zeros([dataSize[0],dataSize[2]])
-    temp[xx,zz] = 1000
-    plt.imshow(dataSSFP[:,yy,:,0].T + temp.T)
-    ax = plt.gca()
-    for jj in np.where(ck[ii]>minWeight)[0]:
-        ang = atomSpecs[ii][jj]['Angles']
+        ax.quiver(coords[ii,0],coords[ii,1],X,Y,scale=scaleFactor/atomCoef[jj,ii], headwidth=1, angles='xy')
+#plt.title('Fascicle directions axial, vx[%d,%d]' % (medXX,medYY))
+plt.subplot(132)
+temp = np.zeros([dataSize[0],dataSize[2]])
+temp[xx,zz] = 1000
+plt.imshow(dataSSFP[:,medYY,:,0].T + temp.T)
+ax = plt.gca()
+for ii in range(1000):
+    for jj in np.where(atomCoef[:,ii]>minWeight)[0][1:]:
+        ang = atomSpecs[jj]['angles']
         X = np.cos(ang[0])*np.sin(ang[1])
         Z = np.cos(ang[1])
-        ax.quiver(xx,zz,X,Z,angles='xy',scale=0.5*1/ck[ii][jj])
-    plt.title('Fascicle directions coronal, vx[%d,%d]' % (xx,zz))
-    plt.subplot(133)
-    temp = np.zeros([dataSize[1],dataSize[2]])
-    temp[yy,zz] = 1000
-    plt.imshow(dataSSFP[xx,:,:,0].T + temp.T)
-    ax = plt.gca()
-    for jj in np.where(ck[ii]>minWeight)[0]:
-        ang = atomSpecs[ii][jj]['Angles']
+        ax.quiver(coords[ii,0],coords[ii,2],X,Z,scale=scaleFactor/atomCoef[jj,ii], headwidth=1, angles='xy')
+#plt.title('Fascicle directions coronal, vx[%d,%d]' % (medXX,medYY))
+plt.subplot(133)
+temp = np.zeros([dataSize[1],dataSize[2]])
+temp[yy,zz] = 1000
+plt.imshow(dataSSFP[medXX,:,:,0].T + temp.T)
+ax = plt.gca()
+for ii in range(1000):
+    for jj in np.where(atomCoef[:,ii]>minWeight)[0][1:]:
+        ang = atomSpecs[jj]['angles']
         Y = np.sin(ang[0])*np.sin(ang[1])
         Z = np.cos(ang[1])
-        ax.quiver(yy,zz,Y,Z,angles='xy',scale=0.5*1/ck[ii][jj])
-    plt.title('Fascicle directions sagital, vx[%d,%d]' % (yy,zz))
-    
-    np.savez( './resultsVXOpt', coords=coords, xk=xk, ck=ck, aspecs=atomSpecs )
-    
+        ax.quiver(coords[ii,1],coords[ii,2],Y,Z,scale=scaleFactor/atomCoef[jj,ii], headwidth=1, angles='xy')
+#plt.title('Fascicle directions sagital, vx[%d,%d]' % (medYY,medZZ))
+
+
 #%% save
 #np.savez( saveFolder + 'recParams_'+ appendName, crec=C_rec, aspecs=atomSpecs )
 #

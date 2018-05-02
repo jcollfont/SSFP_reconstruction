@@ -68,7 +68,7 @@ def loadDWIdata(loadFolder, header):
         bvalues[ii] = scaleB*pow(np.linalg.norm(gradient[ii],2),2)
         if bvalues[ii]  != 0:
             Gnorm[ii,:] =  gradient[ii] / np.linalg.norm(gradient[ii],2)
-    
+   
     # find redundant gradients and clear them out
     Corre = np.matmul( Gnorm, Gnorm.transpose() )
     ixGen = np.ones([numGradients])
