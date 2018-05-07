@@ -46,13 +46,6 @@ t2wimg = nrrd.read(t2wPath)[0]
 
 qvalues = np.abs(qvalues)**2
 
-# Retrieve anatomical mask
-try:
-    anatMask = nrrd.read( maskPath )[0]
-except:
-    print 'Anatomical mask not found'
-
-
 #%% Compute params
 dataSize = dataSSFP.shape
 numDiff = diffGradients.shape[0]
@@ -61,6 +54,14 @@ spacing = Bmax/float(numBval-1)
 ixB0 = np.where( qvalues == 0 )[0]  # Find B-balues equal to 0
 
 TRsampling = (np.arange(N) +1)*TR
+
+
+# Retrieve anatomical mask
+try:
+    anatMask = nrrd.read( maskPath )[0]
+except:
+    anatMask = np.ones(dataSize)
+    print 'Anatomical mask not found'
 
 
 #%% single slice algorithm

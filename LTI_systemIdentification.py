@@ -322,7 +322,7 @@ def clusterDatapoints( t1wimg, t2wimg, avrgVoxelsPerCluster ):
     X = np.concatenate(( t1wimg, t2wimg ), axis=1)
 
     # look for clusters with K-means
-    km = cluster.KMeans(n_clusters=numClusters, verbose=1, n_jobs=20).fit(X)
+    km = cluster.KMeans(n_clusters=numClusters, verbose=0, n_jobs=20).fit(X)
 
     # for each group, retrieve label mask annd create indices mask
     groupIX = range(numClusters)
