@@ -356,6 +356,7 @@ def runLTIsysIDonClusters( dataSSFP, KL, anatMask, groupIX, diffGradients, TR, q
     # prealocate data for results
     recData = np.zeros([dataSize[-1],np.prod(dataSize[0:-1])])
     atomCoef = range(numGroups)
+    atomSpecs = range(numGroups)
 
     # for every group
     for gr in range(1,numGroups):       # group 0 is backgrounnd
@@ -382,8 +383,11 @@ def runLTIsysIDonClusters( dataSSFP, KL, anatMask, groupIX, diffGradients, TR, q
             atomCoef[gr][:,groupIX[gr]] = ck.todense()
             atomCoef[gr] = sparse.lil_matrix(atomCoef[gr])
 
+            # atomSpecs
+            atomSpecs[gr] = atomSpecsNew
+
         # reshape data
         recData = np.reshape( recData ,[dataSize[3], dataSize[0], dataSize[1],dataSize[2]]).transpose(1,2,3,0)
         
 
-    return recData, atomCoef, atomSpecs, impulsePrev
+    return recData, atomCoef, atomSpecs

@@ -77,11 +77,11 @@ clusterGroups = clusterDatapoints( t1wimg, t2wimg, 5000 )
 
 # run algorithm
 print('start!')
-recData, atomCoef, atomSpecs, impulseResponse =  runLTIsysIDonClusters( dataSSFP, KL, anatMask, clusterGroups, diffGradients, TRsampling, qvalues,  ixB0 , 1024,10,10, numThreads)
+recData, atomCoef, atomSpecs =  runLTIsysIDonClusters( dataSSFP, KL, anatMask, clusterGroups, diffGradients, TRsampling, qvalues,  ixB0 , 1024,10,10, numThreads)
 end_time = time.time()
 print('Total compute time: %s secs' %( end_time - start_time )) 
     
-np.savez( 'data_DWI/resultsVXOpt', coords=coords, xk=recData, atomCoef=atomCoef, aspecs=atomSpecs )
+np.savez( 'data_DWI/resultsVXOpt',  xk=recData, atomCoef=atomCoef, aspecs=atomSpecs )
 
 # #%% PLOTS
 # medXX = int(np.median(xx))
