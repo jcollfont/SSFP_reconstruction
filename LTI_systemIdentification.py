@@ -11,7 +11,7 @@ import numpy as np
 from scipy import signal, sparse
 from scipy.spatial.distance import cdist
 
-import sklearn as sk
+import sklearn.cluster as cluster
 
 #import matplotlib.pyplot as plt
 from MFMatomGeneration import generateTensorAtomsFromParam, generateTensorAtomsFromAtomSpecs, uniformRAndomDistributionOnSphere, generateVectorFromAngle
@@ -322,7 +322,7 @@ def clusterDatapoints( t1wimg, t2wimg, avrgVoxelsPerCluster ):
     X = np.concatenate(( t1wimg, t2wimg ), axis=1)
 
     # look for clusters with K-means
-    km = sk.cluster.KMeans(n_clusters=numClusters, verbose=1, n_jobs=20).fit(X)
+    km = cluster.KMeans(n_clusters=numClusters, verbose=1, n_jobs=20).fit(X)
 
     # for each group, retrieve label mask annd create indices mask
     groupIX = range(numClusters)
