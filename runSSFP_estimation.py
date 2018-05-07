@@ -16,7 +16,7 @@ from LTI_systemIdentification import runLTIsysIDonSlice,  clusterDatapoints, run
 from MFMatomGeneration import generateTensorAtomsFromParam, generateTensorAtomsFromAtomSpecs, uniformRAndomDistributionOnSphere, generateVectorFromAngle
 
 
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 
 #%% set paths
 baseFolder = './data_DWI/CSRBRAINS/20180416/'
