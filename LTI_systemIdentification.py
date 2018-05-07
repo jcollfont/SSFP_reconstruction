@@ -31,7 +31,8 @@ def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomS
     verbose = False
     
     N,M = y.shape
-    
+
+    numBlocks = 50   
     maxIter = 2e2
     minIter = 10
     stepEpsilon = 1e-2
@@ -50,17 +51,21 @@ def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomS
     # prediagonalize Tau
     if isinstance(tau, (list, np.ndarray, tuple)):
         sdTau = sparse.diags(tau)
-        
     else:
         tau = np.array(tau)
     
     # set initial guess
-    xk = np.ndarray([N,M],dtype=np.float32)
-    for vx in range(M):
-        xk[:,vx] = tau[vx]*sparse.block_diag(np.tile(L[vx,:],[N,1])).dot(impulseResponsePrev[0,:].T) 
-#    xk = np.float32( tau* np.tile( impulseResponsePrev[0,:].dot(L.T), [M,1])).ravel()
-        ck[0,vx] = tau[vx]
-    
+    xk = np.float32( sdTau.dot(np.tile( impulseResponsePrev[0,:], [M,1])).transpose() )
+    ck[0,:] = tau
+
+    # determine parallelization blocks
+    blockSize  = int(np.ceil(M/np.float(numBlocks)))
+    print 'Num blocks: %d of size: %d for total of %d voxels' %(numBlocks, blockSize, M)
+    blockIX = range(numBlocks)
+    for bb in range(numBlocks):    
+        blockIX[bb] = range( bb*blockSize, min( (bb+1)*blockSize, M)  )
+
+
     # ITERATE  !
     k = 0
     numAtomsPrev = numAtoms
@@ -84,27 +89,40 @@ def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomS
         
         # create new and join with previous impulse responses
         impulseResponse, atomSpecsNew = generateTensorAtomsFromParam( diffGradients, TR, qval, angles, sigmaScales, eigvalProp, 1 ) 
-        impulseResponse = np.concatenate( (impulseResponsePrev, impulseResponse ) )
+        impulseResponse = np.concatenate( (impulseResponsePrev, sparse.block_diag(np.tile(L,[N,1])).dot(impulseResponse) ) )
         numAtoms = impulseResponse.shape[0]
             
         # compute gradient
         gradF = ( xk - y )  # ommiting a 2* on the gradient to use it later
         
-        # run optimization
-#        tempCell = Parallel(n_jobs=numThreads)( delayed(voxelWiseOpt)(impulseResponse.T, gradF[:,vx], tau[vx], xk[:,vx], L[vx,:]) for vx in range(M) )
-        tempCell = range(M)
-        for vx in range(M):
-            tempCell[vx] = voxelWiseOpt(impulseResponse.T, gradF[:,vx], tau[vx], xk[:,vx], L[vx,:])
+        # compute projection of gradient on all atoms
+#        print 'Search for minimum atom descent'
+        tempK = Parallel(n_jobs=numBlocks)( delayed(minSearchPolicy)(impulseResponse, gradF[:, bb]) for bb in blockIX )
         
-        # reorganize data
-        a = np.ndarray([N,M])
-        alpha = np.ndarray([M])
-        minK = np.arange(M)
-        for vx in range(M):
-            a[:,vx] = tempCell[vx][0]
-            alpha[vx] = tempCell[vx][1]
-            minK[vx] =  tempCell[vx][2]
+        # reconstruct minK array        
+        minK = np.ndarray([M], dtype=tempK[0].dtype)
+        for bb in range(numBlocks):
+            minK[blockIX[bb]] =  tempK[bb]
+            
+        # set descent direction
+#        print 'Atom generation'
+        a = sdTau.dot(impulseResponse[minK,:]) - xk.transpose()
         
+
+        # compute step length
+#        print 'Get alpha'
+        normA = np.sum(a**2,axis=1)
+        flagsNonInv = np.where(normA < 1e-8)[0]
+        if flagsNonInv.size > 0:            # in case a'*a = 0
+            normA.flags.writeable = True
+            normA[flagsNonInv] = 1.0
+        
+        alpha = np.maximum( np.minimum( -np.sum( (a * gradF.transpose()) ,axis=1) / normA  ,np.ones([M])) ,np.zeros([M]) )
+        
+        if flagsNonInv.size > 0:            # in case a'*a = 0
+            alpha[ flagsNonInv ] = 0
+        
+
         # update xk
 #        print 'Update xk'
         x_prev = xk
@@ -156,6 +174,17 @@ def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomS
     
     # return
     return ck, xk, impulseResponsePrev, atomSpecs
+
+#%%
+def minSearchPolicy(impulseResponse, gradF):
+    
+    # compute projection of gradient on all atoms
+    rp = np.float32(np.dot( impulseResponse , gradF ))
+
+    # select minimum projection
+    minK = rp.argmin(axis=0)
+    
+    return minK
 
 #%%
 def voxelWiseOpt(impulseResponse, gradF, tau, xk, L):
@@ -326,7 +355,7 @@ def runLTIsysIDonClusters( dataSSFP, KL, anatMask, groupIX, diffGradients, TR, q
 
     # prealocate data for results
     recData = np.zeros([dataSize[-1],np.prod(dataSize[0:-1])])
-    atomCoef = np.zeros( [0,np.prod(dataSize[0:-1])], dtype=np.float32)
+    atomCoef = range(numGroups)
 
     # for every group
     for gr in range(1,numGroups):       # group 0 is backgrounnd
@@ -338,19 +367,20 @@ def runLTIsysIDonClusters( dataSSFP, KL, anatMask, groupIX, diffGradients, TR, q
 
             # determina appropriate values for the SSFP model
             meanKL = np.mean( KL )
+            impulsePrev = sparse.block_diag( np.tile(KL,[dataSize[-1],1]) ).dot(impulsePrev)
 
             # run algorithm
             tau = np.ones([np.prod(dataSize[0:-1])])
-            ck, xk, impulsePrev, atomSpecs = runLTIsysID( dataGroup, meanKL, tau, diffGradients, TR, qvalues, impulsePrev, atomSpecs, numAng, numSigma, numEigvalProp,numThreads)
+            ck, xk, impulseNew, atomSpecsNew = runLTIsysID( dataGroup, meanKL, tau, diffGradients, TR, qvalues, impulsePrev, atomSpecs, numAng, numSigma, numEigvalProp,numThreads)
             
             # reconstruct data
             recData[:,groupIX[gr]] = xk
 
             # atom coefficients
             numAtoms = ck.shape[0]
-            atomCoef = np.zeros( [numAtoms,np.prod(dataSize[0:-1])], dtype=np.float32)
-            atomCoef[:,groupIX[gr]] = ck.todense()
-            atomCoef = sparse.lil_matrix(atomCoef)
+            atomCoef[gr] = np.zeros( [numAtoms,np.prod(dataSize[0:-1])], dtype=np.float32)
+            atomCoef[gr][:,groupIX[gr]] = ck.todense()
+            atomCoef[gr] = sparse.lil_matrix(atomCoef[gr])
 
         # reshape data
         recData = np.reshape( recData ,[dataSize[3], dataSize[0], dataSize[1],dataSize[2]]).transpose(1,2,3,0)
