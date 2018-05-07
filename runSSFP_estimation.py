@@ -12,7 +12,7 @@ from scipy import sparse
 import nrrd
 from loadDWIdata import loadDWIdata, saveNRRDwithHeader
 from SSFP_functions import computeAllSSFPParams
-from LTI_systemIdentification import runLTIsysIDonSlice, runLTIsysID
+from LTI_systemIdentification import runLTIsysIDonSlice,  clusterDatapoints, runLTIsysIDonClusters
 from MFMatomGeneration import generateTensorAtomsFromParam, generateTensorAtomsFromAtomSpecs, uniformRAndomDistributionOnSphere, generateVectorFromAngle
 
 
@@ -63,87 +63,80 @@ ixB0 = np.where( qvalues == 0 )[0]  # Find B-balues equal to 0
 TRsampling = (np.arange(N) +1)*TR
 
 
-#coords = [ [30,37,32], [40,40,32], [28,41,31], [27,42,31], [58,58,25], [58,48,23] ]
-xx, yy, zz = np.meshgrid(np.arange(30,40 ), np.arange(30,40), np.arange(30,40) )
-coords = list(  np.concatenate(( xx.reshape([xx.size,1]), yy.reshape([xx.size,1]), 32*np.ones([xx.size,1]) ) ,axis=1) )
-
 #%% single slice algorithm
-print('Running algorithm on single voxel')
-ck = range(len(coords))
-xk = range(len(coords))
-atomSpecs = range(len(coords))
-
+print('Running algorithm on clusters voxel')
 start_time = time.time()
 
 # compute SSFP variables
 K, L, E1, E2 = computeAllSSFPParams(t1wimg, t2wimg, TR, alpha, M0, N)
 KL = np.tile(K,[N,1,1,1]).transpose(1,2,3,0)*L
-KL = KL * np.tile( np.mean( dataSSFP[:,:,:,ixB0], axis=3 )/ np.sum(KL,axis=3) ,[N,1,1,1]).transpose(1,2,3,0) 
+KL = KL * np.tile( np.mean( dataSSFP[:,:,:,ixB0], axis=3 )/ np.sum(KL,axis=3) ,[    N,1,1,1]).transpose(1,2,3,0) 
 
-anatMask = np.ones(xx.shape)
+# create clusters of data
+clusterGroups = clusterDatapoints( t1wimg, t2wimg, 5000 )
+
+# run algorithm
 print('start!')
-recData, atomCoef, atomSpecs, impulsePrev = runLTIsysIDonSlice( dataSSFP[xx,yy,zz,:].reshape( [xx.shape[0],xx.shape[1],xx.shape[2],114]), KL[xx,yy,zz,:].reshape([xx.shape[0],xx.shape[1],xx.shape[2],5]), anatMask, diffGradients, TRsampling, qvalues,  ixB0 , np.zeros([0]), [], 1024,10,10, numThreads)
-    
+recData, atomCoef, atomSpecs, impulseResponse =  runLTIsysIDonClusters( dataSSFP, KL, anatMask, clusterGroups, diffGradients, TRsampling, qvalues,  ixB0 , 1024,10,10, numThreads)
 end_time = time.time()
 print('Total compute time: %s secs' %( end_time - start_time )) 
     
-    
-np.savez( './resultsVXOpt', coords=coords, xk=recData, atomCoef=atomCoef, aspecs=atomSpecs )
+np.savez( 'data_DWI/resultsVXOpt', coords=coords, xk=recData, atomCoef=atomCoef, aspecs=atomSpecs )
 
-#%% PLOTS
-medXX = int(np.median(xx))
-medYY = int(np.median(yy))
-medZZ =  int(np.median(zz))
+# #%% PLOTS
+# medXX = int(np.median(xx))
+# medYY = int(np.median(yy))
+# medZZ =  int(np.median(zz))
 
-xx = xx.ravel()
-yy = yy.ravel()
-zz = zz.ravel()
+# xx = xx.ravel()
+# yy = yy.ravel()
+# zz = zz.ravel()
 
-scaleFactor = 1
+# scaleFactor = 1
 
-minWeight = 0.02
+# minWeight = 0.02
 
-plt.figure()
-plt.plot(atomCoef)
-plt.title('Weights')
+# plt.figure()
+# plt.plot(atomCoef)
+# plt.title('Weights')
 
-plt.figure()
-temp = np.zeros(dataSize[:2])
-temp[xx,yy] = 1000
-plt.subplot(131)
-plt.imshow(dataSSFP[:,:,medZZ,0].T + temp.T)
-ax = plt.gca()
-for ii in range(1000):
-    for jj in np.where(atomCoef[:,ii]>minWeight)[0][1:]:
-        ang = atomSpecs[jj]['angles']
-        X = np.cos(ang[0])*np.sin(ang[1])
-        Y = np.sin(ang[0])*np.sin(ang[1])
-        ax.quiver(coords[ii,0],coords[ii,1],X,Y,scale=scaleFactor/atomCoef[jj,ii], headwidth=1, angles='xy')
-#plt.title('Fascicle directions axial, vx[%d,%d]' % (medXX,medYY))
-plt.subplot(132)
-temp = np.zeros([dataSize[0],dataSize[2]])
-temp[xx,zz] = 1000
-plt.imshow(dataSSFP[:,medYY,:,0].T + temp.T)
-ax = plt.gca()
-for ii in range(1000):
-    for jj in np.where(atomCoef[:,ii]>minWeight)[0][1:]:
-        ang = atomSpecs[jj]['angles']
-        X = np.cos(ang[0])*np.sin(ang[1])
-        Z = np.cos(ang[1])
-        ax.quiver(coords[ii,0],coords[ii,2],X,Z,scale=scaleFactor/atomCoef[jj,ii], headwidth=1, angles='xy')
-#plt.title('Fascicle directions coronal, vx[%d,%d]' % (medXX,medYY))
-plt.subplot(133)
-temp = np.zeros([dataSize[1],dataSize[2]])
-temp[yy,zz] = 1000
-plt.imshow(dataSSFP[medXX,:,:,0].T + temp.T)
-ax = plt.gca()
-for ii in range(1000):
-    for jj in np.where(atomCoef[:,ii]>minWeight)[0][1:]:
-        ang = atomSpecs[jj]['angles']
-        Y = np.sin(ang[0])*np.sin(ang[1])
-        Z = np.cos(ang[1])
-        ax.quiver(coords[ii,1],coords[ii,2],Y,Z,scale=scaleFactor/atomCoef[jj,ii], headwidth=1, angles='xy')
-#plt.title('Fascicle directions sagital, vx[%d,%d]' % (medYY,medZZ))
+# plt.figure()
+# temp = np.zeros(dataSize[:2])
+# temp[xx,yy] = 1000
+# plt.subplot(131)
+# plt.imshow(dataSSFP[:,:,medZZ,0].T + temp.T)
+# ax = plt.gca()
+# for ii in range(1000):
+#     for jj in np.where(atomCoef[:,ii]>minWeight)[0][1:]:
+#         ang = atomSpecs[jj]['angles']
+#         X = np.cos(ang[0])*np.sin(ang[1])
+#         Y = np.sin(ang[0])*np.sin(ang[1])
+#         ax.quiver(coords[ii,0],coords[ii,1],X,Y,scale=scaleFactor/atomCoef[jj,ii], headwidth=1, angles='xy')
+# #plt.title('Fascicle directions axial, vx[%d,%d]' % (medXX,medYY))
+# plt.subplot(132)
+# temp = np.zeros([dataSize[0],dataSize[2]])
+# temp[xx,zz] = 1000
+# plt.imshow(dataSSFP[:,medYY,:,0].T + temp.T)
+# ax = plt.gca()
+# for ii in range(1000):
+#     for jj in np.where(atomCoef[:,ii]>minWeight)[0][1:]:
+#         ang = atomSpecs[jj]['angles']
+#         X = np.cos(ang[0])*np.sin(ang[1])
+#         Z = np.cos(ang[1])
+#         ax.quiver(coords[ii,0],coords[ii,2],X,Z,scale=scaleFactor/atomCoef[jj,ii], headwidth=1, angles='xy')
+# #plt.title('Fascicle directions coronal, vx[%d,%d]' % (medXX,medYY))
+# plt.subplot(133)
+# temp = np.zeros([dataSize[1],dataSize[2]])
+# temp[yy,zz] = 1000
+# plt.imshow(dataSSFP[medXX,:,:,0].T + temp.T)
+# ax = plt.gca()
+# for ii in range(1000):
+#     for jj in np.where(atomCoef[:,ii]>minWeight)[0][1:]:
+#         ang = atomSpecs[jj]['angles']
+#         Y = np.sin(ang[0])*np.sin(ang[1])
+#         Z = np.cos(ang[1])
+#         ax.quiver(coords[ii,1],coords[ii,2],Y,Z,scale=scaleFactor/atomCoef[jj,ii], headwidth=1, angles='xy')
+# #plt.title('Fascicle directions sagital, vx[%d,%d]' % (medYY,medZZ))
 
 
 #%% save

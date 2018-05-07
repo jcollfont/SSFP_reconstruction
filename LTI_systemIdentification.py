@@ -11,6 +11,8 @@ import numpy as np
 from scipy import signal, sparse
 from scipy.spatial.distance import cdist
 
+import sklearn as sk
+
 #import matplotlib.pyplot as plt
 from MFMatomGeneration import generateTensorAtomsFromParam, generateTensorAtomsFromAtomSpecs, uniformRAndomDistributionOnSphere, generateVectorFromAngle
 from SSFP_functions import computeAllSSFPParams
@@ -276,3 +278,82 @@ def extrapolateData( atomCoef, atomSpecs, anatMask, diffAngles, bvalues, dataSiz
         extrapData[:,:,sliceIX,:] = np.reshape(atomCoef[zz].dot( impulseResponse ), [dataSize[0],dataSize[1],sliceBlockSize, numDiff] )
     
     return extrapData, diffusionGradients
+
+
+#%%
+def clusterDatapoints( t1wimg, t2wimg, avrgVoxelsPerCluster ):
+
+    dataSize = t1wimg.size
+    numClusters = dataSize/avrgVoxelsPerCluster
+
+
+    # reorder data
+    t1wimg = t1wimg.reshape( np.prod(t1wimg.shape[:-1]), t1wimg.shape[-1] )
+    t2wimg = t2wimg.reshape( np.prod(t2wimg.shape[:-1]), t2wimg.shape[-1] )
+    X = np.concatenate(( t1wimg, t2wimg ), axis=1)
+
+    # look for clusters with K-means
+    km = sk.cluster.KMeans(n_clusters=numClusters, verbose=1, n_jobs=20).fit(X)
+
+    # for each group, retrieve label mask annd create indices mask
+    groupIX = range(numClusters)
+    for gg in range(numClusters):
+        groupIX[gg] = np.where( km.labels_ == gg )[0]
+
+    return groupIX
+
+#%%
+#
+#
+#       groupIX -> group 0  is background
+#
+def runLTIsysIDonClusters( dataSSFP, KL, anatMask, groupIX, diffGradients, TR, qvalues,  ixB0 , numAng, numSigma, numEigvalProp, numThreads=1 ):
+    
+    dataSize = dataSSFP.shape
+    numGroups = len(groupIX)
+    np.random.seed()
+    
+    # atoms for water fraction
+    impulsePrev, atomSpecs = generateTensorAtomsFromParam( diffGradients, TR, qvalues, np.zeros([2,1]),np.linspace(1e-4,1e-2,20), np.ones([1]), 1)
+    
+    # prepare mask and data
+    dataSSFP = dataSSFP.reshape( np.prod(dataSize[0:-1]), dataSize[-1] ).T
+    anatMaskIX = np.where(anatMask.ravel() == 1)[0]
+    dataSSFP = dataSSFP[anatMaskIX,:]
+
+    KL = np.reshape(KL,[np.prod(dataSize[0:-1]), KL.shape[-1]])
+    KL = KL[anatMaskIX,:]
+
+    # prealocate data for results
+    recData = np.zeros([dataSize[-1],np.prod(dataSize[0:-1])])
+    atomCoef = np.zeros( [0,np.prod(dataSize[0:-1])], dtype=np.float32)
+
+    # for every group
+    for gr in range(1,numGroups):       # group 0 is backgrounnd
+
+        # retrieve the data from groups
+        dataGroup = dataSSFP[groupIX[gr],:]
+
+        if anatMaskIX.size > 0:
+
+            # determina appropriate values for the SSFP model
+            meanKL = np.mean( KL )
+
+            # run algorithm
+            tau = np.ones([np.prod(dataSize[0:-1])])
+            ck, xk, impulsePrev, atomSpecs = runLTIsysID( dataGroup, meanKL, tau, diffGradients, TR, qvalues, impulsePrev, atomSpecs, numAng, numSigma, numEigvalProp,numThreads)
+            
+            # reconstruct data
+            recData[:,groupIX[gr]] = xk
+
+            # atom coefficients
+            numAtoms = ck.shape[0]
+            atomCoef = np.zeros( [numAtoms,np.prod(dataSize[0:-1])], dtype=np.float32)
+            atomCoef[:,groupIX[gr]] = ck.todense()
+            atomCoef = sparse.lil_matrix(atomCoef)
+
+        # reshape data
+        recData = np.reshape( recData ,[dataSize[3], dataSize[0], dataSize[1],dataSize[2]]).transpose(1,2,3,0)
+        
+
+    return recData, atomCoef, atomSpecs, impulsePrev
