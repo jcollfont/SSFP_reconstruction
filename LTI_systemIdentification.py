@@ -89,8 +89,9 @@ def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomS
         
         # create new and join with previous impulse responses
         impulseResponse, atomSpecsNew = generateTensorAtomsFromParam( diffGradients, TR, qval, angles, sigmaScales, eigvalProp, 1 ) 
-        impulseResponse = np.concatenate( (impulseResponsePrev, sparse.block_diag(np.tile(L,[N,1])).dot(impulseResponse) ) )
+        impulseResponse = np.concatenate( (impulseResponsePrev, sparse.block_diag(np.tile(L,[N,1])).dot(impulseResponse.T).T ) )
         numAtoms = impulseResponse.shape[0]
+
             
         # compute gradient
         gradF = ( xk - y )  # ommiting a 2* on the gradient to use it later
@@ -106,8 +107,7 @@ def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomS
             
         # set descent direction
 #        print 'Atom generation'
-        a = sdTau.dot(impulseResponse[minK,:]) - xk.transpose()
-        
+        a = sdTau.dot(impulseResponse[minK,:]) - xk.T
 
         # compute step length
 #        print 'Get alpha'
@@ -122,11 +122,10 @@ def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomS
         if flagsNonInv.size > 0:            # in case a'*a = 0
             alpha[ flagsNonInv ] = 0
         
-
         # update xk
 #        print 'Update xk'
         x_prev = xk
-        xk = xk + sparse.diags(alpha).dot(a.T).T
+        xk = xk + sparse.diags(alpha).dot(a).T
        
         # update ck
 #        print 'update ck'
@@ -156,6 +155,9 @@ def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomS
         updateReport = 'Iter: %d. Obj. fun.: %0.6f. Step: %0.6f. NumAtoms: %d, active: %d' %( k,  fitErr,  stepSize, numAtoms, numAtomsPrev)
         print updateReport
         if (k > minIter) & ((k > maxIter) | (stepSize < stepEpsilon)):
+            break
+        if np.any(np.isnan(fitErr)):
+            print 'Found NaN solutions. Exiting'
             break
 
         
@@ -236,7 +238,7 @@ def runLTIsysIDonSlice( dataSSFP, KL, anatMask, diffGradients, TR, qvalues,  ixB
         KL = KL[anatMaskIX,:]
 
         # run algorithm
-        tau = np.ones([np.prod(dataSize[0:-1])])
+        tau = np.mean( dataSSFP[ixB0,:], axis=0 )
         ck, xk, impulsePrev, atomSpecs = runLTIsysID( dataSSFP, KL, tau, diffGradients, TR, qvalues, impulsePrev, atomSpecsInit, numAng, numSigma, numEigvalProp,numThreads)
         
         # reconstruct data
@@ -310,16 +312,16 @@ def extrapolateData( atomCoef, atomSpecs, anatMask, diffAngles, bvalues, dataSiz
 
 
 #%%
-def clusterDatapoints( t1wimg, t2wimg, avrgVoxelsPerCluster ):
+def clusterDatapoints( t1wimg, t2wimg, anatMask, avrgVoxelsPerCluster ):
 
-    dataSize = t1wimg.size
+    maskIX = np.where(anatMask.ravel() == 1)[0]
+    dataSize = maskIX.size
     numClusters = dataSize/avrgVoxelsPerCluster
 
-
     # reorder data
-    t1wimg = t1wimg.reshape( np.prod(t1wimg.shape[:-1]), t1wimg.shape[-1] )
-    t2wimg = t2wimg.reshape( np.prod(t2wimg.shape[:-1]), t2wimg.shape[-1] )
-    X = np.concatenate(( t1wimg, t2wimg ), axis=1)
+    t1wimg = t1wimg.ravel()
+    t2wimg = t2wimg.ravel()
+    X = np.concatenate(( t1wimg[maskIX], t2wimg[maskIX] ), axis=0).reshape(dataSize,2)
 
     # look for clusters with K-means
     km = cluster.KMeans(n_clusters=numClusters, verbose=0, n_jobs=20).fit(X)
@@ -343,12 +345,13 @@ def runLTIsysIDonClusters( dataSSFP, KL, anatMask, groupIX, diffGradients, TR, q
     np.random.seed()
     
     # atoms for water fraction
+    print 'Computing impulse responses for water'
     impulsePrev, atomSpecs = generateTensorAtomsFromParam( diffGradients, TR, qvalues, np.zeros([2,1]),np.linspace(1e-4,1e-2,20), np.ones([1]), 1)
     
     # prepare mask and data
     dataSSFP = dataSSFP.reshape( np.prod(dataSize[0:-1]), dataSize[-1] ).T
     anatMaskIX = np.where(anatMask.ravel() == 1)[0]
-    dataSSFP = dataSSFP[anatMaskIX,:]
+    dataSSFP = dataSSFP[:,anatMaskIX]
 
     KL = np.reshape(KL,[np.prod(dataSize[0:-1]), KL.shape[-1]])
     KL = KL[anatMaskIX,:]
@@ -362,17 +365,19 @@ def runLTIsysIDonClusters( dataSSFP, KL, anatMask, groupIX, diffGradients, TR, q
     for gr in range(1,numGroups):       # group 0 is backgrounnd
 
         # retrieve the data from groups
-        dataGroup = dataSSFP[groupIX[gr],:]
+        dataGroup = dataSSFP[:,groupIX[gr]]
 
-        if anatMaskIX.size > 0:
+        if groupIX[gr].size > 0:
 
             # determina appropriate values for the SSFP model
-            meanKL = np.mean( KL )
-            impulsePrev = sparse.block_diag( np.tile(KL,[dataSize[-1],1]) ).dot(impulsePrev)
+            print 'Apapting KL matrix to the specific subgroup'
+            meanKL = np.mean( KL[groupIX[gr],:], axis=0 )
+            impulsePrevKL = sparse.block_diag( np.tile( meanKL, [dataSize[-1],1]) ).dot(impulsePrev.T).T
 
             # run algorithm
-            tau = np.ones([np.prod(dataSize[0:-1])])
-            ck, xk, impulseNew, atomSpecsNew = runLTIsysID( dataGroup, meanKL, tau, diffGradients, TR, qvalues, impulsePrev, atomSpecs, numAng, numSigma, numEigvalProp,numThreads)
+            print 'run group %d with %d voxels' %(gr, dataGroup.shape[1])
+            tau = np.mean( dataGroup[ixB0,:], axis=0 )
+            ck, xk, impulseNew, atomSpecsNew = runLTIsysID( dataGroup, meanKL, tau, diffGradients, TR, qvalues, impulsePrevKL, atomSpecs, numAng, numSigma, numEigvalProp,numThreads)
             
             # reconstruct data
             recData[:,groupIX[gr]] = xk

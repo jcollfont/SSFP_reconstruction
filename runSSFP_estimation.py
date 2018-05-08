@@ -60,7 +60,7 @@ TRsampling = (np.arange(N) +1)*TR
 try:
     anatMask = nrrd.read( maskPath )[0]
 except:
-    anatMask = np.ones(dataSize)
+    anatMask = np.ones(dataSize[:-1])
     print 'Anatomical mask not found'
 
 
@@ -71,10 +71,21 @@ start_time = time.time()
 # compute SSFP variables
 K, L, E1, E2 = computeAllSSFPParams(t1wimg, t2wimg, TR, alpha, M0, N)
 KL = np.tile(K,[N,1,1,1]).transpose(1,2,3,0)*L
+
+# eliminate the ones that give unreasonable values
+badVx =  np.where(np.any( np.isnan( KL ), axis=3).ravel())[0]
+anatMask = anatMask.ravel()
+anatMask[badVx] = 0
+
+# eliminate the background points
+noiseVx = np.where(  np.max(dataSSFP[:,:,:, qvalues > 0],axis=3)  > np.mean( dataSSFP[:,:,:,ixB0] , axis=3) )[0]
+anatMask[noiseVx] = 0
+
 KL = KL * np.tile( np.mean( dataSSFP[:,:,:,ixB0], axis=3 )/ np.sum(KL,axis=3) ,[    N,1,1,1]).transpose(1,2,3,0) 
 
 # create clusters of data
-clusterGroups = clusterDatapoints( t1wimg, t2wimg, 5000 )
+print 'Generating clusters'
+clusterGroups = clusterDatapoints( t1wimg, t2wimg, anatMask, 5000 )
 
 # run algorithm
 print('start!')
