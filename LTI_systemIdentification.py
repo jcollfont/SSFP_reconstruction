@@ -33,7 +33,7 @@ def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomS
     N,M = y.shape
 
     numBlocks = numThreads
-    maxIter = 2e2
+    maxIter = 1e2
     minIter = 10
     stepEpsilon = 1e-2
     ckEpsilon = 1e-6
@@ -353,7 +353,7 @@ def runLTIsysIDonClusters( dataSSFP, KL, anatMask, groupIX, diffGradients, TR, q
     KL = KL[anatMaskIX,:]
 
     # prealocate data for results
-    recData = np.zeros([dataSize[-1],np.prod(dataSize[0:-1])])
+    recData = range(numGroups)#np.zeros([dataSize[-1],np.prod(dataSize[0:-1])])
     atomCoef = range(numGroups)
     atomSpecsOut = range(numGroups)
 
@@ -376,7 +376,8 @@ def runLTIsysIDonClusters( dataSSFP, KL, anatMask, groupIX, diffGradients, TR, q
             ck, xk, impulseNew, atomSpecsNew = runLTIsysID( dataGroup, meanKL, tau, diffGradients, TR, qvalues, impulsePrevKL, atomSpecs, numAng, numSigma, numEigvalProp,numThreads)
             
             # reconstruct data
-            recData[:,groupIX[gr]] = xk
+            # recData[:,groupIX[gr]] = xk
+            recData[gr] = xk
 
             # atom coefficients
             # numAtoms = ck.shape[0]
@@ -393,6 +394,6 @@ def runLTIsysIDonClusters( dataSSFP, KL, anatMask, groupIX, diffGradients, TR, q
         
         # temporary save
         print 'saving...'
-        np.savez( 'data_DWI/resultsSSFPOpt',  xk=recData, atomCoef=atomCoef, aspecs=atomSpecs, clusterIX=groupIX )
+        np.savez( 'data_DWI/resultsSSFPOpt',  xk=recData, atomCoef=atomCoef, aspecs=atomSpecsOut, clusterIX=groupIX )
 
-    return recData, atomCoef, atomSpecs
+    return recData, atomCoef, atomSpecsOut

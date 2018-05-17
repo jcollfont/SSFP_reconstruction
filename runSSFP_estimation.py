@@ -27,7 +27,7 @@ t2wPath = baseFolder + 'data_for_analysis/bestt2w_lowres.nrrd'
 maskPath = baseFolder + 'common-processed/manualMaskssfp.nrrd'
 
 appendName = 'basicAtom_ssfp'
-saveFolder = '/Users/jaume/Desktop/DWI/csr/common-processed/ssfp/'
+saveFolder = 'data_DWI/CSRBRAINS/20180416/common-processed/ssfp'
 
 #%% set params
 alpha = 35  # degrees (flip angle)
@@ -93,7 +93,7 @@ recData, atomCoef, atomSpecs =  runLTIsysIDonClusters( dataSSFP, KL, anatMask, c
 end_time = time.time()
 print('Total compute time: %s secs' %( end_time - start_time )) 
     
-np.savez( 'data_DWI/resultsVXOpt',  xk=recData, atomCoef=atomCoef, aspecs=atomSpecs )
+# np.savez( 'data_DWI/resultsVXOpt',  xk=recData, atomCoef=atomCoef, aspecs=atomSpecs, clusterIX=clusterGroups  )
 
 # #%% PLOTS
 # medXX = int(np.median(xx))
