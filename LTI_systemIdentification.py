@@ -32,7 +32,7 @@ def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomS
     
     N,M = y.shape
 
-    numBlocks = 50   
+    numBlocks = numThreads
     maxIter = 2e2
     minIter = 10
     stepEpsilon = 1e-2
@@ -40,7 +40,7 @@ def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomS
     numAtoms = impulseResponsePrev.shape[0]
     
     activeAtomsFixed = np.arange(len(atomSpecs))
-    
+
     # reporting system
 #    if verbose:
 #        plt.figure()
@@ -142,9 +142,10 @@ def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomS
 
         # save used and prune unused atoms
 #        print 'update impulse and atomsects'
+        # print activeAtoms
         impulseResponsePrev = impulseResponse[ activeAtoms,:]
-        atomSpecs = list( atomSpecs[i] for i in np.where( activeAtoms < numAtomsPrev)[0] ) 
-        atomSpecs += list( atomSpecsNew[i-numAtomsPrev] for i in np.where( activeAtoms >= numAtomsPrev)[0] ) 
+        atomSpecs = list( atomSpecs[i] for i in activeAtoms[ activeAtoms < numAtomsPrev ] ) 
+        atomSpecs += list( atomSpecsNew[i-numAtomsPrev] for i in activeAtoms[ activeAtoms >= numAtomsPrev ] ) 
         numAtomsPrev = activeAtoms.size
         
         # evaluate fit
@@ -312,19 +313,14 @@ def extrapolateData( atomCoef, atomSpecs, anatMask, diffAngles, bvalues, dataSiz
 
 
 #%%
-def clusterDatapoints( t1wimg, t2wimg, anatMask, avrgVoxelsPerCluster ):
+def clusterDatapoints( KL, anatMask, avrgVoxelsPerCluster ):
 
     maskIX = np.where(anatMask.ravel() == 1)[0]
     dataSize = maskIX.size
     numClusters = dataSize/avrgVoxelsPerCluster
 
-    # reorder data
-    t1wimg = t1wimg.ravel()
-    t2wimg = t2wimg.ravel()
-    X = np.concatenate(( t1wimg[maskIX], t2wimg[maskIX] ), axis=0).reshape(dataSize,2)
-
     # look for clusters with K-means
-    km = cluster.KMeans(n_clusters=numClusters, verbose=0, n_jobs=20).fit(X)
+    km = cluster.KMeans(n_clusters=numClusters, verbose=0, n_jobs=20).fit(KL[maskIX,:])
 
     # for each group, retrieve label mask annd create indices mask
     groupIX = range(numClusters)
@@ -359,7 +355,7 @@ def runLTIsysIDonClusters( dataSSFP, KL, anatMask, groupIX, diffGradients, TR, q
     # prealocate data for results
     recData = np.zeros([dataSize[-1],np.prod(dataSize[0:-1])])
     atomCoef = range(numGroups)
-    atomSpecs = range(numGroups)
+    atomSpecsOut = range(numGroups)
 
     # for every group
     for gr in range(1,numGroups):       # group 0 is backgrounnd
@@ -375,24 +371,28 @@ def runLTIsysIDonClusters( dataSSFP, KL, anatMask, groupIX, diffGradients, TR, q
             impulsePrevKL = sparse.block_diag( np.tile( meanKL, [dataSize[-1],1]) ).dot(impulsePrev.T).T
 
             # run algorithm
-            print 'run group %d with %d voxels' %(gr, dataGroup.shape[1])
-            tau = np.mean( dataGroup[ixB0,:], axis=0 )
+            print 'run group %d of %d with %d voxels' %(gr, len(groupIX), groupIX[gr].size)
+            tau = np.mean( dataGroup[ixB0,:], axis=0 ) /  np.mean(np.mean( dataGroup[ixB0,:], axis=0 ))
             ck, xk, impulseNew, atomSpecsNew = runLTIsysID( dataGroup, meanKL, tau, diffGradients, TR, qvalues, impulsePrevKL, atomSpecs, numAng, numSigma, numEigvalProp,numThreads)
             
             # reconstruct data
             recData[:,groupIX[gr]] = xk
 
             # atom coefficients
-            numAtoms = ck.shape[0]
-            atomCoef[gr] = np.zeros( [numAtoms,np.prod(dataSize[0:-1])], dtype=np.float32)
-            atomCoef[gr][:,groupIX[gr]] = ck.todense()
-            atomCoef[gr] = sparse.lil_matrix(atomCoef[gr])
+            # numAtoms = ck.shape[0]
+            # atomCoef[gr] = np.zeros( [numAtoms,np.prod(dataSize[0:-1])], dtype=np.float32)
+            # atomCoef[gr][:,groupIX[gr]] = ck.todense()
+            # atomCoef[gr] = sparse.lil_matrix(atomCoef[gr])
+            atomCoef[gr] = ck
 
             # atomSpecs
-            atomSpecs[gr] = atomSpecsNew
+            atomSpecsOut[gr] = atomSpecsNew
 
         # reshape data
-        recData = np.reshape( recData ,[dataSize[3], dataSize[0], dataSize[1],dataSize[2]]).transpose(1,2,3,0)
+        # recData = np.reshape( recData ,[dataSize[3], dataSize[0], dataSize[1],dataSize[2]]).transpose(1,2,3,0)
         
+        # temporary save
+        print 'saving...'
+        np.savez( 'data_DWI/resultsSSFPOpt',  xk=recData, atomCoef=atomCoef, aspecs=atomSpecs, clusterIX=groupIX )
 
     return recData, atomCoef, atomSpecs

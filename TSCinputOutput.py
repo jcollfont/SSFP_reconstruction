@@ -20,10 +20,12 @@ groupFolder = { 'tsc': 'TSC/', 'autism':'Autism/', 'control':'Controls/' }
 
     
 #%% pull TSC data
-def pullTSCDatasets( inputPath, savePath ):
+def pullTSCDatasets( inputPath, savePath, ageTarget=np.NaN, genderTarget='' ,targetFolder='diffusion/cusp90/01-motioncorrection/' , targetHeader='_mocoraff_diffusion.nhdr'):
     
     # define
     caseRef = 'case'
+    processedPath = inputPath + 'Processed/'
+    rawPath = inputPath + 'RAW/'
     
     # prealocate
     subjectsData = []
@@ -31,7 +33,7 @@ def pullTSCDatasets( inputPath, savePath ):
     scanID = []
     
     # determine valid cases
-    inputFolders = os.listdir(inputPath)
+    inputFolders = os.listdir(processedPath)
     for fol in inputFolders:
         
         # if valid reference
@@ -43,19 +45,30 @@ def pullTSCDatasets( inputPath, savePath ):
                 
                 # retrieve subject ID and subFoldName
                 subjID.append(int(fol.lower().split(caseRef)[-1]))
-                subFoldName = os.listdir( inputPath + fol )[0]
-                scanFold = os.listdir( inputPath + fol +'/' +subFoldName+'/')
+                subFoldName = os.listdir( processedPath + fol )[0]
+                scanFold = os.listdir( processedPath + fol +'/' +subFoldName+'/')
                 
                 # gert available runs
-                subjectsData.append({ 'subjID': subjID[-1], 'dataPaths' : []})
+                
                 scanID.append([])
                 for ss in scanFold:
                     if ss.find('scan') > -1:
                         
                         # generate load path
-                        loadFolder = inputPath + fol +'/' +subFoldName+'/' + ss + '/common-processed/diffusion/cusp90/01-motioncorrection/' 
+                        baseFolder = processedPath + fol +'/' +subFoldName+'/' + ss + '/common-processed/'
+                        loadFolder = processedPath + fol +'/' +subFoldName+'/' + ss + '/common-processed/' + targetFolder 
                         
-                        if os.path.exists( loadFolder ):
+                        # retrieve subject info
+                        fi = open( rawPath + fol +'/' +subFoldName+'/' + ss + '/data_for_analysis/scaninfo.csv')
+                        lines = fi.readlines()
+                        fi.close()
+                        age = float(lines[1].split(',')[np.where([ 'age' == s for s in lines[0].split(',') ])[0][0]])
+                        gender = lines[1].split(',')[np.where([ 'gender' == s for s in lines[0].split(',') ])[0][0]]
+                        
+                        
+                        if ( (ageTarget - 2 < int(age) < ageTarget + 2) | np.isnan(ageTarget) ) &\
+                        ( (  gender == genderTarget ) | ( genderTarget == '' ) )  &\
+                        os.path.exists( loadFolder ):
                             
                             scanID[-1].append(  int(ss.split('scan')[-1]) )
                             
@@ -63,19 +76,31 @@ def pullTSCDatasets( inputPath, savePath ):
                             subjSTR = 'c' + str(subjID[-1]).zfill(3) +'_s' + str(scanID[-1][-1]).zfill(2) 
                             
                             # diff header
-                            diffusionHeader = subjSTR + '_mocoraff_diffusion.nhdr'
+                            diffusionHeader = subjSTR + targetHeader
                             
                             # get mask path
                             maskPath =  subjSTR + '_uncorrected_dwi_icc.nrrd'  
                             
                             # generate load path
                             saveFolder=  savePath + fol +'/' +subFoldName+'/' + ss + '/commmon-processed/' 
-                    
-            
-                            subjectsData[-1]['dataPaths'].append( { 'loadFolder' : loadFolder, 'diffHeader' : diffusionHeader, 'maskPath' : maskPath, 'saveFolder' : saveFolder, 'subjID' : subjID[-1], 'scanID': scanID[-1][-1] } )
+                            
+                            # save data
+                            if (len(subjectsData) == 0):
+                                subjectsData.append({ 'subjID': subjID[-1], 'dataPaths' : []})
+                            elif (subjectsData[-1]['subjID'] != subjID[-1]):
+                                subjectsData.append({ 'subjID': subjID[-1], 'dataPaths' : []})
+                                
+                            subjectsData[-1]['dataPaths'].append( { 'subjSTR':subjSTR, 'baseFolder': baseFolder, \
+                                                                    'loadFolder' : loadFolder, 'diffHeader' : diffusionHeader, \
+                                                                    'maskPath' : maskPath, 'saveFolder' : saveFolder, 'subjID' : subjID[-1], \
+                                                                    'scanID': scanID[-1][-1], 'age':age, 'gender':gender } )
                 
             except:
-                print '%s  is not a case' %( fol )
+                print '%s  is not a valid case' %( fol )
     
     
     return subjectsData
+
+
+    
+    

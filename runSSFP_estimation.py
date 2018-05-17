@@ -24,7 +24,7 @@ ssfpFolder = baseFolder + 'data_for_analysis/ssfp/'
 header = 'ssfpData.nhdr'
 t1wPath = baseFolder + 'data_for_analysis/bestt1w_lowres.nrrd'
 t2wPath = baseFolder + 'data_for_analysis/bestt2w_lowres.nrrd'
-maskPath = baseFolder + 'something.nrrd'
+maskPath = baseFolder + 'common-processed/manualMaskssfp.nrrd'
 
 appendName = 'basicAtom_ssfp'
 saveFolder = '/Users/jaume/Desktop/DWI/csr/common-processed/ssfp/'
@@ -36,7 +36,7 @@ G = 40  # mT/m   (max gradient strength)
 N = 5   # number of longitudonal lines (echo number +1)
 TR = 40*1e-3 #s
 
-numThreads = 1
+numThreads = 50
 
 #%% load data
 dataSSFP, qvalues, diffGradients, Bmax, headerPath, uniqueGrads, valIX = loadDWIdata(ssfpFolder, header)
@@ -71,9 +71,11 @@ start_time = time.time()
 # compute SSFP variables
 K, L, E1, E2 = computeAllSSFPParams(t1wimg, t2wimg, TR, alpha, M0, N)
 KL = np.tile(K,[N,1,1,1]).transpose(1,2,3,0)*L
+KL = KL * np.tile( np.mean( dataSSFP[:,:,:,ixB0], axis=3 )/ np.sum(KL,axis=3) ,[    N,1,1,1]).transpose(1,2,3,0) 
+KL = KL.reshape(np.prod(dataSize[:-1]),N)
 
 # eliminate the ones that give unreasonable values
-badVx =  np.where(np.any( np.isnan( KL ), axis=3).ravel())[0]
+badVx =  np.where( np.isnan( KL ))[0]
 anatMask = anatMask.ravel()
 anatMask[badVx] = 0
 
@@ -81,11 +83,9 @@ anatMask[badVx] = 0
 noiseVx = np.where(  np.max(dataSSFP[:,:,:, qvalues > 0],axis=3)  > np.mean( dataSSFP[:,:,:,ixB0] , axis=3) )[0]
 anatMask[noiseVx] = 0
 
-KL = KL * np.tile( np.mean( dataSSFP[:,:,:,ixB0], axis=3 )/ np.sum(KL,axis=3) ,[    N,1,1,1]).transpose(1,2,3,0) 
-
 # create clusters of data
 print 'Generating clusters'
-clusterGroups = clusterDatapoints( t1wimg, t2wimg, anatMask, 5000 )
+clusterGroups = clusterDatapoints( KL, anatMask, 10000 )
 
 # run algorithm
 print('start!')
