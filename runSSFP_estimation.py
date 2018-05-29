@@ -12,8 +12,8 @@ from scipy import sparse
 import nrrd
 from loadDWIdata import loadDWIdata, saveNRRDwithHeader
 from SSFP_functions import computeAllSSFPParams
-from LTI_systemIdentification import runLTIsysIDonSlice,  clusterDatapoints, runLTIsysIDonClusters
-from MFMatomGeneration import generateTensorAtomsFromParam, generateTensorAtomsFromAtomSpecs, uniformRAndomDistributionOnSphere, generateVectorFromAngle
+from LTI_systemIdentification import runLTIsysIDonSlice,  clusterDatapoints, runLTIsysIDonClusters, extrapolateDWIData
+from MFMatomGeneration import generateTensorAtomsFromParam, generateTensorAtomsFromAtomSpecs, uniformRAndomDistributionOnSphere, simulateMultiShellHardi, generateVectorFromAngle
 
 
 # import matplotlib.pyplot as plt
@@ -27,7 +27,7 @@ t2wPath = baseFolder + 'data_for_analysis/bestt2w_lowres.nrrd'
 maskPath = baseFolder + 'common-processed/manualMaskssfp.nrrd'
 
 appendName = 'basicAtom_ssfp'
-saveFolder = 'data_DWI/CSRBRAINS/20180416/common-processed/ssfp'
+saveFolder = 'data_DWI/CSRBRAINS/20180416/common-processed/ssfp/'
 
 #%% set params
 alpha = 35  # degrees (flip angle)
@@ -82,6 +82,7 @@ anatMask[badVx] = 0
 # eliminate the background points
 noiseVx = np.where(  np.max(dataSSFP[:,:,:, qvalues > 0],axis=3)  > np.mean( dataSSFP[:,:,:,ixB0] , axis=3) )[0]
 anatMask[noiseVx] = 0
+anatMaskIX = np.where(anatMask.ravel())[0]
 
 # create clusters of data
 print 'Generating clusters'
@@ -93,77 +94,21 @@ recData, atomCoef, atomSpecs =  runLTIsysIDonClusters( dataSSFP, KL, anatMask, c
 end_time = time.time()
 print('Total compute time: %s secs' %( end_time - start_time )) 
     
-# np.savez( 'data_DWI/resultsVXOpt',  xk=recData, atomCoef=atomCoef, aspecs=atomSpecs, clusterIX=clusterGroups  )
-
-# #%% PLOTS
-# medXX = int(np.median(xx))
-# medYY = int(np.median(yy))
-# medZZ =  int(np.median(zz))
-
-# xx = xx.ravel()
-# yy = yy.ravel()
-# zz = zz.ravel()
-
-# scaleFactor = 1
-
-# minWeight = 0.02
-
-# plt.figure()
-# plt.plot(atomCoef)
-# plt.title('Weights')
-
-# plt.figure()
-# temp = np.zeros(dataSize[:2])
-# temp[xx,yy] = 1000
-# plt.subplot(131)
-# plt.imshow(dataSSFP[:,:,medZZ,0].T + temp.T)
-# ax = plt.gca()
-# for ii in range(1000):
-#     for jj in np.where(atomCoef[:,ii]>minWeight)[0][1:]:
-#         ang = atomSpecs[jj]['angles']
-#         X = np.cos(ang[0])*np.sin(ang[1])
-#         Y = np.sin(ang[0])*np.sin(ang[1])
-#         ax.quiver(coords[ii,0],coords[ii,1],X,Y,scale=scaleFactor/atomCoef[jj,ii], headwidth=1, angles='xy')
-# #plt.title('Fascicle directions axial, vx[%d,%d]' % (medXX,medYY))
-# plt.subplot(132)
-# temp = np.zeros([dataSize[0],dataSize[2]])
-# temp[xx,zz] = 1000
-# plt.imshow(dataSSFP[:,medYY,:,0].T + temp.T)
-# ax = plt.gca()
-# for ii in range(1000):
-#     for jj in np.where(atomCoef[:,ii]>minWeight)[0][1:]:
-#         ang = atomSpecs[jj]['angles']
-#         X = np.cos(ang[0])*np.sin(ang[1])
-#         Z = np.cos(ang[1])
-#         ax.quiver(coords[ii,0],coords[ii,2],X,Z,scale=scaleFactor/atomCoef[jj,ii], headwidth=1, angles='xy')
-# #plt.title('Fascicle directions coronal, vx[%d,%d]' % (medXX,medYY))
-# plt.subplot(133)
-# temp = np.zeros([dataSize[1],dataSize[2]])
-# temp[yy,zz] = 1000
-# plt.imshow(dataSSFP[medXX,:,:,0].T + temp.T)
-# ax = plt.gca()
-# for ii in range(1000):
-#     for jj in np.where(atomCoef[:,ii]>minWeight)[0][1:]:
-#         ang = atomSpecs[jj]['angles']
-#         Y = np.sin(ang[0])*np.sin(ang[1])
-#         Z = np.cos(ang[1])
-#         ax.quiver(coords[ii,1],coords[ii,2],Y,Z,scale=scaleFactor/atomCoef[jj,ii], headwidth=1, angles='xy')
-# #plt.title('Fascicle directions sagital, vx[%d,%d]' % (medYY,medZZ))
+# save output
+np.savez( 'data_DWI/resultsVXOpt',  atomCoef=atomCoef, aspecs=atomSpecs, clusterIX=clusterGroups  )
 
 
-#%% save
-#np.savez( saveFolder + 'recParams_'+ appendName, crec=C_rec, aspecs=atomSpecs )
-#
-## reorganize the resulting data
-#numAtoms = len(atomSpecs)
-#tempRec = np.zeros(dataSize,dtype=np.float32)
-#for zz in range(sliceBlocks):
-#    sliceIX = range( zz*sliceBlockSize, min( (zz+1)*sliceBlockSize, dataSize[2] ) )
-#    # rec signal
-#    tempRec[:,:,sliceIX,:] = recData[zz]
-# 
-#
-## save and compute error
-#saveNRRDwithHeader( np.float32(tempRec), headerPath, saveFolder, 'recData_' + appendName , bvalues, diffGradients )
-#errData = np.float32(tempRec - dataSSFP)
-#saveNRRDwithHeader( errData, headerPath, saveFolder, 'errRecData_' + appendName , bvalues, diffGradients )
+# generate SSFP reconstructions
+tempRec = np.zeros([np.prod(dataSize[:-1]), dataSize[-1]])
+for ii in range(len(clusterGroups)):
+    tempRec[ anatMaskIX[clusterGroups[ii]] ,:] = recData[ii].T
+
+tempRec = tempRec.reshape(dataSize) 
+saveNRRDwithHeader( np.float32(tempRec), headerPath, saveFolder, 'recDataSSFP' , qvalues, diffGradients )
+
+# generate DWI data
+dwiGrad, dwiBvals = simulateMultiShellHardi([8,4],[0,250,500,1000,1500,2000])
+dwiData = extrapolateDWIData( atomCoef, atomSpecs, anatMaskIX, dwiGrad, dwiBvals, dataSize, clusterGroups)
+dwiData = dwiData * np.tile(np.mean( dataSSFP[:,:,:,ixB0], axis=3 ),[dwiBvals.size,1,1,1]).transpose(1,2,3,0)
+
+saveNRRDwithHeader( np.float32(dwiData), headerPath, saveFolder, 'dwiRecSSFP' , dwiBvals, dwiGrad )

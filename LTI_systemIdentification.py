@@ -14,7 +14,7 @@ from scipy.spatial.distance import cdist
 import sklearn.cluster as cluster
 
 #import matplotlib.pyplot as plt
-from MFMatomGeneration import generateTensorAtomsFromParam, generateTensorAtomsFromAtomSpecs, uniformRAndomDistributionOnSphere, generateVectorFromAngle
+from MFMatomGeneration import generateTensorAtomsFromParam, generateTensorAtomsFromAtomSpecs, uniformRAndomDistributionOnSphere, generateVectorFromAngle, parseAtomSpecs
 from SSFP_functions import computeAllSSFPParams
 
 
@@ -26,7 +26,7 @@ from SSFP_functions import computeAllSSFPParams
 #
 #
 #
-def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomSpecs, numAng, numSigma, numEigvalProp, numThreads=1):
+def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomSpecs, numAng, numSigma, numEigvalProp, numThreads=50):
     
     verbose = False
     
@@ -36,7 +36,7 @@ def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomS
     maxIter = 1e2
     minIter = 10
     stepEpsilon = 1e-2
-    ckEpsilon = 1e-6
+    ckEpsilon = 1e-3
     numAtoms = impulseResponsePrev.shape[0]
     
     activeAtomsFixed = np.arange(len(atomSpecs))
@@ -136,16 +136,16 @@ def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomS
         
         # prune unused ck
         activeAtoms = np.where(np.sum( ck >=  ckEpsilon ,axis=1) > 0)[0]
-        activeAtoms = np.unique( np.concatenate(( activeAtomsFixed, activeAtoms )) )
+        activeAtoms = np.sort(np.unique( np.concatenate(( activeAtomsFixed, activeAtoms )) ))
         
         ck =  ck[activeAtoms,:]
 
         # save used and prune unused atoms
 #        print 'update impulse and atomsects'
-        # print activeAtoms
         impulseResponsePrev = impulseResponse[ activeAtoms,:]
-        atomSpecs = list( atomSpecs[i] for i in activeAtoms[ activeAtoms < numAtomsPrev ] ) 
-        atomSpecs += list( atomSpecsNew[i-numAtomsPrev] for i in activeAtoms[ activeAtoms >= numAtomsPrev ] ) 
+        tempSpecs = atomSpecs + atomSpecsNew
+        atomSpecs = list( tempSpecs[i] for i in  activeAtoms  ) 
+        # atomSpecs += list( atomSpecsNew[i-numAtomsPrev] for i in np.where( activeAtoms >= numAtomsPrev)[0] ) 
         numAtomsPrev = activeAtoms.size
         
         # evaluate fit
@@ -294,22 +294,25 @@ def computeODFmap( atomCoef, atomSpecs, axisAngles, bandwidth, dataSize, numAtom
     return angleODFmap, diffGradients
 
 #%%
-def extrapolateData( atomCoef, atomSpecs, anatMask, diffAngles, bvalues, dataSize, sliceBlockSize):
-    
-    sliceBlocks = len(atomCoef)
+def extrapolateDWIData( atomCoef, atomSpecs, anatMask, diffGradients, bvalues, dataSize, groupClusterIX):
 
-    # impulse responses
-    impulseResponse, diffusionGradients = generateTensorAtomsFromAtomSpecs( diffAngles, bvalues, atomSpecs )
-    
-    # compute extrapolated data
-    numDiff = impulseResponse.shape[1]
-    extrapData  = np.zeros( [dataSize[0],dataSize[1],dataSize[2], numDiff] ,dtype=np.float32)
+    # prealocate    
+    sliceBlocks = len(atomCoef)
+    numDiff = bvalues.size
+    extrapData  = np.zeros( [dataSize[0]*dataSize[1]*dataSize[2], numDiff] ,dtype=np.float32)
+
+    # for every cluster block   
     for zz in range(sliceBlocks):
-        
-        sliceIX = range( zz*sliceBlockSize, min( (zz+1)*sliceBlockSize, dataSize[2] ) )
-        extrapData[:,:,sliceIX,:] = np.reshape(atomCoef[zz].dot( impulseResponse ), [dataSize[0],dataSize[1],sliceBlockSize, numDiff] )
+        print 'group : ' + str(zz)
+        # impulse responses
+        impulseResponse = generateTensorAtomsFromAtomSpecs( diffGradients, bvalues, atomSpecs[zz] )
+        # extrapolate data
+        extrapData[anatMask[groupClusterIX[zz]],:] = atomCoef[zz].T.dot( impulseResponse )
     
-    return extrapData, diffusionGradients
+    # reshape 
+    extrapData = extrapData.reshape( dataSize[:-1] + (numDiff,))
+
+    return extrapData
 
 
 #%%
@@ -342,7 +345,7 @@ def runLTIsysIDonClusters( dataSSFP, KL, anatMask, groupIX, diffGradients, TR, q
     
     # atoms for water fraction
     print 'Computing impulse responses for water'
-    impulsePrev, atomSpecs = generateTensorAtomsFromParam( diffGradients, TR, qvalues, np.zeros([2,1]),np.linspace(1e-4,1e-2,20), np.ones([1]), 1)
+    impulsePrev, atomSpecs = generateTensorAtomsFromParam( diffGradients, TR, qvalues, np.zeros([2,1]),np.linspace(1e-4,1e-2,100), np.ones([1]), 1)
     
     # prepare mask and data
     dataSSFP = dataSSFP.reshape( np.prod(dataSize[0:-1]), dataSize[-1] ).T
@@ -358,7 +361,7 @@ def runLTIsysIDonClusters( dataSSFP, KL, anatMask, groupIX, diffGradients, TR, q
     atomSpecsOut = range(numGroups)
 
     # for every group
-    for gr in range(1,numGroups):       # group 0 is backgrounnd
+    for gr in range(numGroups):       # group 0 is backgrounnd
 
         # retrieve the data from groups
         dataGroup = dataSSFP[:,groupIX[gr]]
@@ -394,6 +397,6 @@ def runLTIsysIDonClusters( dataSSFP, KL, anatMask, groupIX, diffGradients, TR, q
         
         # temporary save
         print 'saving...'
-        np.savez( 'data_DWI/resultsSSFPOpt',  xk=recData, atomCoef=atomCoef, aspecs=atomSpecsOut, clusterIX=groupIX )
+        # np.savez( 'data_DWI/resultsSSFPOpt',  xk=recData, atomCoef=atomCoef, aspecs=atomSpecsOut, clusterIX=groupIX )
 
     return recData, atomCoef, atomSpecsOut

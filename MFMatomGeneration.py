@@ -189,9 +189,9 @@ def generateTensorAtomsFromParam( diffGradients, TR, qval, angles, sigmaScales, 
     sigmas = np.array([ np.ones([numProp]), 1/eigvalProp, 1/eigvalProp ])
     Ks = Parallel(n_jobs=numThreads)( delayed(computeNormalizedTensor)(K[aa], sigmas, numGrad, numProp) for aa in range(numAng) )
     
-    diffCoef = np.zeros([numGrad,numSigma,numProp,numAng])
+    diffCoef = np.zeros([numGrad,numAng,numProp,numSigma])
     for aa in range(numAng):
-        diffCoef[:,:,:,aa] = np. outer( Ks[aa], sigmaScales ).reshape( [numGrad, numSigma, numProp] )
+        diffCoef[:,aa,:,:] = np. outer( Ks[aa], sigmaScales ).reshape( [numGrad, numProp, numSigma] )
 
     atomSpecs = []
     for aa in range(numAng):
@@ -215,12 +215,11 @@ def computeDecayingExponentials( diffCoef, TR, qval ):
     return  np.exp( np.outer( diffCoef ,  TR.T*qval ) )
     
 def computeNormalizedTensor(K, sigmas, numGrad, numProp):
-    
-    
+
     Ks = np.ndarray([numGrad,numProp])
     for ii in range(numProp):
         # compute normalized tensor
-        Ks[:,ii] = -np.sum( np.matmul(np.diag(np.sqrt(sigmas[:,ii])), K.T )**2 , axis=0)
+        Ks[:,ii] = -1.0* np.sum( np.matmul(np.diag(np.sqrt(sigmas[:,ii])), K.T )**2 , axis=0)
 
     return Ks
 
@@ -236,6 +235,8 @@ def parseAtomSpecs(atomSpecs):
     allFA[0] = sigmas[0,0]/sigmas[0,1]
     allSig = np.zeros([numAtoms], dtype = np.float32)
     allSig[0]= sigmas[0,0]
+    allAng = np.zeros([numAtoms,2], dtype = np.float32)
+    allAng[0,:] = angles
     
     for aa in range(1,numAtoms):
         if np.all( np.sum((angles - np.tile( atomSpecs[aa]['angles'] ,[angles.shape[0],1]))**2, axis=1) > epsilonAng**2 ):
@@ -246,40 +247,43 @@ def parseAtomSpecs(atomSpecs):
             
         allFA[aa] = atomSpecs[aa]['sigmas'][0]/atomSpecs[aa]['sigmas'][1]
         allSig[aa] = atomSpecs[aa]['sigmas'][0]
+        allAng[aa,:] = atomSpecs[aa]['angles']
             
-    return angles, sigmas,allFA,allSig
+    return angles, sigmas, allFA, allSig, allAng
     
-def generateTensorAtomsFromAtomSpecs( diffGradients, bval, atomSpecs ):
+#%%
+def generateTensorAtomsFromAtomSpecs( diffGradients, bval, atomSpecs , TR=np.ones([1]) ,numThreads=1):
+
+    # parse atomSpecs
+    numGrad = bval.size
+    numAtom = len(atomSpecs)
+    numTR = TR.size
+    sink1, sink2, eigvalProp, sigmaScales, angles = parseAtomSpecs(atomSpecs)
+
+    # init vectors for diffusion directions
+    vecs = generateVectorFromAngle( angles[:,0], angles[:,1] )
+
+    # prealocate diffusion tensors along gradients
+    K = Parallel(n_jobs=numThreads)( delayed(np.matmul)(diffGradients,vecs[aa]) for aa in range(numAtom) )
     
-    # params
-    numAtoms = len(atomSpecs)
-    numGrad = diffGradients.shape[0]
+    # define poles
+    sigmas = np.array([ np.ones([numAtom]), 1/eigvalProp, 1/eigvalProp ])
+    Ks = Parallel(n_jobs=numThreads)( delayed(computeNormalizedTensor)(K[aa], sigmas[:,aa].reshape(3,1), numGrad, 1) for aa in range(numAtom) )
     
-    # for all atoms
-    diffCoef = np.zeros([numGrad,numAtoms])
-    for aa in range(numAtoms):
+    # diffCoef = np.zeros([numGrad, numAtom])
+    # for aa in range(numAtom):
+    #     diffCoef[:,aa] = (Ks[aa]* sigmaScales[aa]).reshape(numGrad)
         
-        # generate diffusion vetors
-        vecs = generateVectorFromAngle( atomSpecs[aa]['angles'][0], atomSpecs[aa]['angles'][1] )
+    diffCoef = np.zeros([numGrad,1,1,numAtom])
+    for aa in range(numAtom):
+        diffCoef[:,:,:,aa] = np. outer( Ks[aa], sigmaScales[aa] ).reshape( [numGrad, 1, 1] )
+    diffCoef = np.reshape(diffCoef, [numGrad,numAtom])
+
+    # compute impulse response
+#    impulseResponses = np.exp( np.outer( diffCoef ,  np.outer( TR, qval ) ) )
+    tempImp = Parallel(n_jobs=numThreads)( delayed(computeDecayingExponentials)( diffCoef[gg,:] ,  TR, bval[gg] ) for gg in range(numGrad) )
     
-        # prealocate diffusion tensors along gradients
-        K = np.matmul( diffGradients, vecs )
-        
-        # determine sigmas
-        sigmas = atomSpecs[aa]['sigmas']
-        
-        # compute diffusion coeff at each gradient direction
-        diffCoef[:,aa] = -np.diag(np.matmul( K[0,:,:], np.matmul(np.diag(sigmas), K[0,:,:].transpose()) ))
-                  
-    # compute impulse response 
-    diffusionVectors = np.zeros([0,3])
-    for gg in range(numGrad): 
-        tempImp =  np.exp( np.outer(diffCoef[gg,:], bval[gg]) )
-        diffusionVectors= np.concatenate(( diffusionVectors, np.outer(bval[gg],diffGradients[gg,:])   ))
-        if gg == 0:
-            impulseResponses = tempImp
-        else:
-            impulseResponses = np.concatenate( (impulseResponses, tempImp), axis=1 )
+    impulseResponses = np.array(tempImp).transpose(0,2,1).reshape( [numGrad*numTR,numAtom] ).T
     
     return impulseResponses
 

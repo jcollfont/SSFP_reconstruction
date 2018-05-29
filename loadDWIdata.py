@@ -143,8 +143,8 @@ def saveNRRDwithHeader( data, headerName, savePath, saveName , bvalues, gradient
             dataFi.writelines( ll )
             
     for ii in range(dataDims[3]):
-        gradients[ii,:] = gradients[ii,:] * np.sqrt( bvalues[ii] / np.float(Bmax) )
-        dataFi.writelines('DWMRI_gradient_' + str(ii).zfill(4)  + (':=%0.8f %0.8f %0.8f\n' %( gradients[ii,0], gradients[ii,1], gradients[ii,2] )))
+        normGradient = gradients[ii,:] * np.sqrt( bvalues[ii] / np.float(Bmax) )
+        dataFi.writelines('DWMRI_gradient_' + str(ii).zfill(4)  + (':=%0.8f %0.8f %0.8f\n' %( normGradient[0], normGradient[1], normGradient[2] )))
         
     dataFi.writelines('data file: LIST\n')
     for ii in range(dataDims[3]):
