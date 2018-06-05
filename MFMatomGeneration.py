@@ -297,7 +297,7 @@ def simulateMultiShellHardi( numAngles, bvalues ):
     maxBvalue = np.max(bvalues)
     for bb in bvalues:
         for vv in vecs:
-            diffGradients = np.concatenate(( diffGradients, vv[:,0].reshape(1,3)/float(maxBvalue)*bb ),axis=0)
+            diffGradients = np.concatenate(( diffGradients, vv[:,0].reshape(1,3)),axis=0)
             allBvalues.append(bb)
 
     return diffGradients, np.array(allBvalues)

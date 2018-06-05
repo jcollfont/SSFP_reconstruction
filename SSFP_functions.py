@@ -103,7 +103,7 @@ def computeL( E1, alpha, N):
 def computeE1(img, TR):
 
 	## Compute E1
-	E1 = np.exp(-TR*1/img)
+	E1 = np.exp(-TR*1e-3/img)   # TR in ms
 
 	return E1
 
@@ -122,7 +122,7 @@ def computeE1(img, TR):
 def computeE2(img, TR):
 
 	## Compute E2
-	E2 = np.exp(-TR*1/img)
+	E2 = np.exp(-TR*1e-3/img)  # TR in ms
 
 	return E2
 

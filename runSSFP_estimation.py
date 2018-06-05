@@ -12,7 +12,7 @@ from scipy import sparse
 import nrrd
 from loadDWIdata import loadDWIdata, saveNRRDwithHeader
 from SSFP_functions import computeAllSSFPParams
-from LTI_systemIdentification import runLTIsysIDonSlice,  clusterDatapoints, runLTIsysIDonClusters, extrapolateDWIData
+from LTI_systemIdentification import clusterDatapoints, runLTIsysIDonClusters, extrapolateDWIData
 from MFMatomGeneration import generateTensorAtomsFromParam, generateTensorAtomsFromAtomSpecs, uniformRAndomDistributionOnSphere, simulateMultiShellHardi, generateVectorFromAngle
 
 
@@ -33,16 +33,16 @@ saveFolder = 'data_DWI/CSRBRAINS/20180416/common-processed/ssfp/'
 alpha = 35  # degrees (flip angle)
 M0 = 1  # T   (magnetic field strength)
 G = 40  # mT/m   (max gradient strength)
-N = 5   # number of longitudonal lines (echo number +1)
-TR = 40*1e-3 #s
+N = 10   # number of longitudonal lines (echo number +1)
+TR = 40 #ms
 
 numThreads = 50
 
 #%% load data
 dataSSFP, qvalues, diffGradients, Bmax, headerPath, uniqueGrads, valIX = loadDWIdata(ssfpFolder, header)
 
-t1wimg = nrrd.read(t1wPath)[0]
-t2wimg = nrrd.read(t2wPath)[0]
+t1wimg = np.float32(nrrd.read(t1wPath)[0])
+t2wimg = np.float32(nrrd.read(t2wPath)[0])
 
 qvalues = np.abs(qvalues)**2
 
@@ -53,7 +53,7 @@ numBval = qvalues.size
 spacing = Bmax/float(numBval-1)
 ixB0 = np.where( qvalues == 0 )[0]  # Find B-balues equal to 0
 
-TRsampling = (np.arange(N) +1)*TR
+TRsampling = (np.arange(N) +1)*TR*1e-3
 
 
 # Retrieve anatomical mask

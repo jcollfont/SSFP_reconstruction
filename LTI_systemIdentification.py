@@ -26,7 +26,7 @@ from SSFP_functions import computeAllSSFPParams
 #
 #
 #
-def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomSpecs, numAng, numSigma, numEigvalProp, numThreads=50):
+def runLTIsysID( y, L, tau, diffGradients, TR, qval, impulseResponsePrev, atomSpecs, numAng, numSigma, numEigvalProp, numThreads=50):
     
     verbose = False
     
@@ -35,7 +35,7 @@ def runLTIsysID( y, L,  tau, diffGradients, TR, qval, impulseResponsePrev, atomS
     numBlocks = numThreads
     maxIter = 1e2
     minIter = 10
-    stepEpsilon = 1e-2
+    stepEpsilon = 1e1
     ckEpsilon = 1e-3
     numAtoms = impulseResponsePrev.shape[0]
     
@@ -217,45 +217,45 @@ def voxelWiseOpt(impulseResponse, gradF, tau, xk, L):
 
     return a, alpha, minK
     
-#%%
-def runLTIsysIDonSlice( dataSSFP, KL, anatMask, diffGradients, TR, qvalues,  ixB0 , impulsePrev, atomSpecs, numAng, numSigma, numEigvalProp, numThreads=1 ):
+# #%%
+# def runLTIsysIDonSlice( dataSSFP, KL, anatMask, diffGradients, TR, qvalues,  ixB0 , impulsePrev, atomSpecs, numAng, numSigma, numEigvalProp, numThreads=1 ):
     
-    dataSize = dataSSFP.shape
-    np.random.seed()
+#     dataSize = dataSSFP.shape
+#     np.random.seed()
     
-    # atoms for water fraction
-    if impulsePrev.size == 0:
-        impulsePrev, atomSpecsInit = generateTensorAtomsFromParam( diffGradients, TR, qvalues, np.zeros([2,1]),np.linspace(1e-4,1e-2,20), np.ones([1]), 1)
+#     # atoms for water fraction
+#     if impulsePrev.size == 0:
+#         impulsePrev, atomSpecsInit = generateTensorAtomsFromParam( diffGradients, TR, qvalues, np.zeros([2,1]),np.linspace(1e-4,1e-2,20), np.ones([1]), 1)
     
-    anatMaskIX = np.where(anatMask.ravel() == 1)[0]
-    recData = np.zeros([dataSize[-1],np.prod(dataSize[0:-1])])
-    atomCoef = np.zeros( [0,np.prod(dataSize[0:-1])], dtype=np.float32)
-    if anatMaskIX.size > 0:
+#     anatMaskIX = np.where(anatMask.ravel() == 1)[0]
+#     recData = np.zeros([dataSize[-1],np.prod(dataSize[0:-1])])
+#     atomCoef = np.zeros( [0,np.prod(dataSize[0:-1])], dtype=np.float32)
+#     if anatMaskIX.size > 0:
         
-        # vectorize and mask data
-        dataSSFP = np.reshape(dataSSFP,[np.prod(dataSize[0:-1]),dataSize[-1]]).transpose()
-        dataSSFP = dataSSFP[ :, anatMaskIX]
-        KL = np.reshape(KL,[np.prod(dataSize[0:-1]), KL.shape[-1]])
-        KL = KL[anatMaskIX,:]
+#         # vectorize and mask data
+#         dataSSFP = np.reshape(dataSSFP,[np.prod(dataSize[0:-1]),dataSize[-1]]).transpose()
+#         dataSSFP = dataSSFP[ :, anatMaskIX]
+#         KL = np.reshape(KL,[np.prod(dataSize[0:-1]), KL.shape[-1]])
+#         KL = KL[anatMaskIX,:]
 
-        # run algorithm
-        tau = np.mean( dataSSFP[ixB0,:], axis=0 )
-        ck, xk, impulsePrev, atomSpecs = runLTIsysID( dataSSFP, KL, tau, diffGradients, TR, qvalues, impulsePrev, atomSpecsInit, numAng, numSigma, numEigvalProp,numThreads)
+#         # run algorithm
+#         tau = np.mean( dataSSFP[ixB0,:], axis=0 )
+#         ck, xk, impulsePrev, atomSpecs = runLTIsysID( dataSSFP, KL, tau, diffGradients, TR, qvalues, impulsePrev, atomSpecsInit, numAng, numSigma, numEigvalProp,numThreads)
         
-        # reconstruct data
-        recData[:,anatMaskIX] = xk
-        recData = np.reshape( recData ,[dataSize[3], dataSize[0], dataSize[1],dataSize[2]]).transpose(1,2,3,0)
+#         # reconstruct data
+#         recData[:,anatMaskIX] = xk
+#         recData = np.reshape( recData ,[dataSize[3], dataSize[0], dataSize[1],dataSize[2]]).transpose(1,2,3,0)
         
-        # atom coefficients
-        numAtoms = ck.shape[0]
-        atomCoef = np.zeros( [numAtoms,np.prod(dataSize[0:-1])], dtype=np.float32)
-        atomCoef[:,anatMaskIX] = ck.todense()
-#        atomCoef =  np.reshape( atomCoef, [numAtoms, dataSize[0], dataSize[1],dataSize[2]] ).transpose(1,2,3,0)
-        atomCoef = sparse.lil_matrix(atomCoef)
-    else:
-        recData = np.reshape( recData ,[dataSize[3], dataSize[0], dataSize[1],dataSize[2]]).transpose(1,2,3,0)
+#         # atom coefficients
+#         numAtoms = ck.shape[0]
+#         atomCoef = np.zeros( [numAtoms,np.prod(dataSize[0:-1])], dtype=np.float32)
+#         atomCoef[:,anatMaskIX] = ck.todense()
+# #        atomCoef =  np.reshape( atomCoef, [numAtoms, dataSize[0], dataSize[1],dataSize[2]] ).transpose(1,2,3,0)
+#         atomCoef = sparse.lil_matrix(atomCoef)
+#     else:
+#         recData = np.reshape( recData ,[dataSize[3], dataSize[0], dataSize[1],dataSize[2]]).transpose(1,2,3,0)
         
-    return recData, atomCoef, atomSpecs, impulsePrev
+#     return recData, atomCoef, atomSpecs, impulsePrev
     
 
 #%%
@@ -345,7 +345,7 @@ def runLTIsysIDonClusters( dataSSFP, KL, anatMask, groupIX, diffGradients, TR, q
     
     # atoms for water fraction
     print 'Computing impulse responses for water'
-    impulsePrev, atomSpecs = generateTensorAtomsFromParam( diffGradients, TR, qvalues, np.zeros([2,1]),np.linspace(1e-4,1e-2,100), np.ones([1]), 1)
+    impulsePrev, atomSpecs = generateTensorAtomsFromParam( diffGradients, TR, qvalues, np.zeros([2,1]),10**np.linspace(-4,-2,1000), np.ones([1]), 1)
     
     # prepare mask and data
     dataSSFP = dataSSFP.reshape( np.prod(dataSize[0:-1]), dataSize[-1] ).T
